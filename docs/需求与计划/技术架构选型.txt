@@ -1,0 +1,739 @@
+你这个担心是对的。上一版方案本质上还是 **workflow-first**：虽然规则配置化了，但大量阶段、接口和业务流程仍然需要人工维护。只要数据源或业务口径变化，维护成本还是会集中到我们身上。
+
+这次我建议换一个思路：
+
+> **Agent 负责“理解、选择、适应和推进”；工具负责“执行、计算和证明”。**  
+> 不做纯脚本，也不做完全自由发挥的 Agent，而是做一个 **agent-first、contract-first、evidence-driven 的采集系统**。
+
+这比“把固定 Workflow 做得更复杂”更适合当前需求。
+
+---
+
+## 一、建议的总体架构
+
+```text
+需求文档 / 云盘 / 本地文件
+          ↓
+   Requirement Compiler
+   把自然语言需求编译成结构化任务契约
+          ↓
+ Collection Agent Harness
+   规划、调用工具、处理异常、决定下一步
+          ↓
+ Typed Capability Tools
+   盘点、下载、解析、去重、筛选、核验、生成 query
+          ↓
+ Verifiers / Evals
+   硬规则校验、证据核验、抽样复核、质量评估
+          ↓
+ 运行账本 + 原始文件 + 结果报告
+```
+
+这里的核心不是预先写死：
+
+```text
+先盘点 → 再下载 → 再解析 → 再去重 → 再筛选
+```
+
+而是让 Agent 根据当前任务状态决定：
+
+```text
+当前缺什么证据？
+下一步应该调用哪个工具？
+这个结果是否可信？
+需要重试、换解析器，还是进入人工复核？
+```
+
+但每个工具都有明确的输入、输出、前置条件和验证器，不能让模型直接“凭感觉改数据库”或“凭感觉判断文件大小”。
+
+---
+
+## 二、Agent 和确定性代码的职责边界
+
+### Agent 负责
+
+- 阅读最新采集需求；
+- 把需求转换为 `RequirementSpec`；
+- 识别需求中的歧义和未定义项；
+- 判断当前应该盘点哪个来源、处理哪批资源；
+- 根据文件类型和解析结果选择下一步工具；
+- 处理解析失败、字段变化、目录结构变化；
+- 对大学教育属性、学科属性、资料类型做语义判断；
+- 选择候选文档和人工复核样本；
+- 组织 query 生成和报告交付；
+- 在任务中断后根据账本恢复工作。
+
+### 确定性工具负责
+
+- 读取云盘资源清单；
+- 下载或导出文件；
+- 判断真实 MIME、文件大小、页数；
+- 计算 SHA-256 和正文指纹；
+- 抽取字符数、词数、页码和表格信息；
+- 执行硬性大小限制；
+- 生成结构化记录；
+- 防止重复下载和重复处理；
+- 校验 query 数量、题型数量和题量限制；
+- 保存来源证据；
+- 阻止删除或修改原始云盘文件。
+
+这就是“Agent 占大头”，但不是“Agent 取代事实系统”。
+
+**Agent 可以决定调用哪个工具，但不能决定工具返回什么事实。**
+
+OpenAI 关于 harness engineering 的总结也是类似方向：人的主要职责从逐行编码转向定义意图、设计环境和反馈回路，Agent 负责执行；系统本身需要具备可理解性、验证和持续反馈机制。([openai.com](https://openai.com/index/harness-engineering/))
+
+---
+
+## 三、可以借鉴 OpenClaw，但不建议直接把 OpenClaw 当业务内核
+
+OpenClaw 的几个设计非常适合借鉴：
+
+| OpenClaw 概念 | 本项目对应设计 |
+|---|---|
+| Gateway | 采集任务控制面 |
+| Agent Runtime | 采集 Agent Harness |
+| Skill | 采集策略和操作手册 |
+| Plugin | 云盘、解析器、LLM、导出器等能力插件 |
+| Agent Loop | 观察、规划、调用工具、验证、继续 |
+| Lobster | 带审批和恢复能力的副作用操作 |
+| Task Flow | 可跨重启恢复的批处理任务 |
+| Memory | 操作偏好、历史决策和异常经验 |
+| SQLite / Artifacts | 真正的运行账本和数据事实 |
+
+OpenClaw 的 Runtime、Session、Skills、Tool Policy 和 Plugin SDK 是相互分离的；它的官方文档也把“Agent loop”定义为接收任务、组装上下文、模型推理、工具执行、持久化的循环。([docs.openclaw.ai](https://docs.openclaw.ai/agent-runtime-architecture))
+
+其中 **Lobster** 的思路尤其适合我们：把副作用操作包装成有类型的多步流程，支持显式审批和 resume token，而不是让 Agent 直接连续执行不可逆动作。([docs.openclaw.ai](https://docs.openclaw.ai/tools/lobster))
+
+但是我不建议当前直接把整个 OpenClaw 作为业务核心，原因有两个：
+
+1. 它包含 Gateway、消息通道、Agent Runtime、插件、自动化等较大的产品面；
+2. OpenClaw 官方文档明确说明 Plugin SDK API 仍属于 experimental，直接绑定其内部运行时会把兼容性风险引入我们的核心系统。([docs.openclaw.ai](https://docs.openclaw.ai/plugins/sdk-overview))
+
+更合理的方式是：
+
+> **实现一个 OpenClaw-like 的窄版 Harness，借鉴它的边界和运行模型；以后可以把它接入 OpenClaw，而不是反过来把业务代码嵌进 OpenClaw 内部。**
+
+---
+
+## 四、最关键的设计：需求文档也作为 Agent 输入
+
+不要把在线文档直接手工翻译成大量硬编码规则，而是增加一个：
+
+```text
+Requirement Compiler
+```
+
+每次运行时：
+
+1. 读取当前在线文档；
+2. 固定文档 revision；
+3. Agent 提取需求；
+4. 输出结构化 `RequirementSpec`；
+5. 标记：
+   - 已确认要求；
+   - 可配置指标；
+   - 未定义项；
+   - 需要人工确认的冲突；
+6. 通过验证后，生成本次运行的任务契约。
+
+例如：
+
+```json
+{
+  "requirement_revision": 198,
+  "sources": [],
+  "languages": [],
+  "hard_constraints": [],
+  "soft_targets": [],
+  "query_policy": {},
+  "review_gates": [],
+  "unknowns": []
+}
+```
+
+这样以后发生变化时：
+
+- 新增云盘文件夹：改需求文档，不改主流程；
+- 语种配额变化：更新 `RequirementSpec`；
+- query 数量变化：更新任务契约；
+- 新增文件格式：Agent 发现当前没有对应能力，进入“能力缺口”状态；
+- 规则存在歧义：Agent 不自行猜，而是挂起等待确认。
+
+这正是 Anthropic 在长运行 Agent 设计中强调的方向：跨上下文工作不能只依赖聊天历史，必须通过结构化任务、交接产物和可验证状态传递上下文。([anthropic.com](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents))
+
+---
+
+## 五、Loop 不应该是无限 ReAct，而应该是有终止条件的任务循环
+
+建议采用下面的通用 Agent Loop：
+
+```text
+Observe
+  ↓
+Plan
+  ↓
+Act
+  ↓
+Verify
+  ↓
+Checkpoint
+  ↓
+Continue / Ask Human / Stop
+```
+
+每轮循环只处理一个明确目标，例如：
+
+- 找出还缺英语候选的来源；
+- 核验一批在线 Docx 的真实大小；
+- 对一组疑似重复文件进行正文比对；
+- 检查某批阿拉伯语 PDF 的文本顺序；
+- 补齐 P1 临床医学候选；
+- 重试上一批下载失败的资源。
+
+必须定义终止条件：
+
+```text
+quota_met
+source_exhausted
+no_new_eligible_documents
+needs_human_decision
+budget_exceeded
+time_limit_reached
+verification_failed
+```
+
+Anthropic 对 loop engineering 的定义也是“Agent 持续循环，直到满足停止条件”，重点不只是让模型多跑几轮，而是设计触发条件、停止条件和适合的任务边界。([claude.com](https://claude.com/blog/getting-started-with-loops))
+
+---
+
+## 六、数据源和业务变化时，维护成本会落在哪里
+
+目标不是让维护成本消失，而是把它限制在可控边界内：
+
+| 变化类型 | 主要维护位置 |
+|---|---|
+| 新增或更换云盘 | `Source Adapter` |
+| 云盘字段变化 | 适配器的 schema mapping |
+| 新增 DOC/PPT/在线资源 | `Extractor Plugin` |
+| 文件大小限制变化 | RequirementSpec / Verifier |
+| 语种和学科配额变化 | RequirementSpec |
+| query 结构变化 | Query Tool Contract |
+| LLM 厂商变化 | Model Adapter |
+| Agent Runtime 变化 | Harness Adapter |
+| 审核口径变化 | Evaluator / Eval Cases |
+
+核心 Loop、运行账本、工具调用协议和审计模型不应该跟着每次业务调整重写。
+
+另外，业务需求变化不应该直接允许 Agent 自动修改代码。更稳妥的过程是：
+
+```text
+需求变更
+  ↓
+Agent 提出 RequirementSpec diff
+  ↓
+自动检查影响范围
+  ↓
+人工确认
+  ↓
+新版本策略进入下一次运行
+```
+
+这比“让 Agent 自己修改整个 workflow”更安全，也更容易追责。
+
+---
+
+## 七、技术路径怎么选
+
+### 方案 A：直接采用 OpenClaw
+
+适合：
+
+- 后续需要聊天入口；
+- 需要 24/7 heartbeat；
+- 需要多 Agent、任务流和插件市场；
+- 希望把采集任务变成可被自然语言驱动的个人/团队 Agent。
+
+不适合直接作为当前核心，因为它的平台面较大，插件 API 仍在演进，且我们现有解析和评测逻辑是 Python 体系。
+
+### 方案 B：LangGraph 作为 Agent Runtime
+
+如果一定要选一个现成的 Python Agent 编排框架，我会优先考虑 LangGraph。
+
+它支持：
+
+- 持久化；
+- Durable Execution；
+- Human-in-the-loop；
+- 流式输出；
+- 确定性步骤和 LLM 步骤混合；
+- 长运行 Agent 的断点恢复。([docs.langchain.com](https://docs.langchain.com/oss/python/langgraph/overview))
+
+但不要把业务逻辑写成一张巨大的固定图。更好的用法是：
+
+```text
+LangGraph
+  └── 一个通用 Agent Loop
+        ├── Requirement Tools
+        ├── Source Tools
+        ├── Extraction Tools
+        ├── Review Tools
+        └── Verification Tools
+```
+
+### 方案 C：OpenAI Agents SDK
+
+OpenAI Agents SDK 已经提供 Agent Loop、Tools、Guardrails、Handoffs、Structured Outputs 和 Tracing，适合快速构建工具调用型 Agent。([openai.github.io](https://openai.github.io/openai-agents-python/))
+
+但当前项目已经使用多模型/多厂商调用方式，因此不建议让 OpenAI Agents SDK 成为唯一运行时。可以把它作为一种可插拔 Runtime。
+
+### 方案 D：Temporal
+
+Temporal 更适合：
+
+- 多机部署；
+- 7×24 运行；
+- 大量长任务；
+- 强事务性；
+- 需要跨服务恢复；
+- 多团队共享任务基础设施。
+
+它本身是 Durable Execution 平台，不是 Agent Framework。当前采集规模还不需要一开始就引入 Temporal。未来如果任务量、并发和运行时长明显扩大，可以把现在的 Tool/Artifact/Verifier 契约迁移过去。([docs.temporal.io](https://docs.temporal.io/))
+
+---
+
+## 八、我的最终建议
+
+我建议采用下面这条路线：
+
+> **Runtime-neutral Agent Harness + Typed Tools + Requirement Compiler + Evaluators + OpenClaw-compatible Skill/Plugin Surface**
+
+具体来说：
+
+1. **保留 Python 作为能力实现层**；
+2. **不再把固定采集流程作为系统核心**；
+3. 实现一个通用 Agent Loop；
+4. 将云盘、解析、去重、筛选、query 生成封装成工具；
+5. 所有工具采用稳定的输入输出契约；
+6. 运行状态采用事件账本和可恢复任务记录；
+7. 需求文档由 Agent 编译成版本化任务契约；
+8. hard rules 和事实计算由 Verifier 控制；
+9. Agent 负责动态规划和异常处理；
+10. 后续可以接 LangGraph、OpenClaw 或 OpenAI Agents SDK，但不让业务层绑定其中任何一个。
+
+可以把它理解为：
+
+```text
+OpenClaw-like 控制面
++ Python 文档能力插件
++ LangGraph-compatible Loop
++ Lobster-like 审批与恢复
++ Evaluator 驱动的质量闭环
+```
+
+## 九、验证“维护成本是否真的降低”
+
+在正式开发前，建议做一个小型架构 Spike，不是先处理全部文件，而是测试三类变化：
+
+1. **数据源变化**  
+   新增一个文件夹、修改目录层级、增加在线 Docx。
+
+2. **业务需求变化**  
+   修改语种配额、query 数量和题型配置。
+
+3. **格式变化**  
+   加入 DOC、PPT 或一种新的在线资源类型。
+
+观察以下指标：
+
+- 变化后是否只需改适配器或需求文档；
+- 是否需要修改核心 Agent Loop；
+- 是否能够从中断处恢复；
+- hard rule 是否仍然 100% 可验证；
+- Agent 是否会正确识别未知项并请求人工确认；
+- 人工复核量是否下降；
+- 单次运行成本和耗时是否可接受。
+
+**结论状态：这条 Agent-first 路线比上一版 workflow-first 更适合需求和数据源频繁变化，但目前仍是“较优、尚未证实”。**  
+最小判别实验不是先做完整采集，而是验证上述三类变化能否在不修改核心 Loop 的情况下完成。
+
+### 参考源
+
+- OpenAI：Harness engineering，重点是 Agent-first、系统可理解性、反馈回路和人机职责重分配。([openai.com](https://openai.com/index/harness-engineering/))
+- Anthropic：Loop engineering，关于触发方式、停止条件和不同类型 Agent Loop。([claude.com](https://claude.com/blog/getting-started-with-loops))
+- Anthropic：长运行 Agent Harness，关于跨上下文交接、结构化产物、规划器/执行器/评估器。([anthropic.com](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents))
+- OpenClaw：Agent Runtime Architecture，关于 Runtime、Session、Skills、Plugins 和 Harness 分层。([docs.openclaw.ai](https://docs.openclaw.ai/agent-runtime-architecture))
+- OpenClaw：Lobster 和 Task Flow，关于类型化流程、审批、恢复 token 和持久任务状态。([docs.openclaw.ai](https://docs.openclaw.ai/tools/lobster))
+- OpenClaw：Why OpenClaw，关于可信 Gateway、非可信执行、确定性策略和版本化状态。([docs.openclaw.ai](https://docs.openclaw.ai/start/why-openclaw))
+- LangGraph：关于 Durable Execution、持久化、人机协作以及确定性步骤和 LLM 步骤混合。([docs.langchain.com](https://docs.langchain.com/oss/python/langgraph/overview))
+- OpenAI Agents SDK：关于 Tools、Guardrails、Handoffs 和 Tracing。([openai.github.io](https://openai.github.io/openai-agents-python/))
+- Temporal：关于跨重启恢复、重试、任务队列和长时间运行工作流。([docs.temporal.io](https://docs.temporal.io/))你这个担心是对的。上一版方案本质上还是 **workflow-first**：虽然规则配置化了，但大量阶段、接口和业务流程仍然需要人工维护。只要数据源或业务口径变化，维护成本还是会集中到我们身上。
+
+这次我建议换一个思路：
+
+> **Agent 负责“理解、选择、适应和推进”；工具负责“执行、计算和证明”。**  
+> 不做纯脚本，也不做完全自由发挥的 Agent，而是做一个 **agent-first、contract-first、evidence-driven 的采集系统**。
+
+这比“把固定 Workflow 做得更复杂”更适合当前需求。
+
+---
+
+## 一、建议的总体架构
+
+```text
+需求文档 / 云盘 / 本地文件
+          ↓
+   Requirement Compiler
+   把自然语言需求编译成结构化任务契约
+          ↓
+ Collection Agent Harness
+   规划、调用工具、处理异常、决定下一步
+          ↓
+ Typed Capability Tools
+   盘点、下载、解析、去重、筛选、核验、生成 query
+          ↓
+ Verifiers / Evals
+   硬规则校验、证据核验、抽样复核、质量评估
+          ↓
+ 运行账本 + 原始文件 + 结果报告
+```
+
+这里的核心不是预先写死：
+
+```text
+先盘点 → 再下载 → 再解析 → 再去重 → 再筛选
+```
+
+而是让 Agent 根据当前任务状态决定：
+
+```text
+当前缺什么证据？
+下一步应该调用哪个工具？
+这个结果是否可信？
+需要重试、换解析器，还是进入人工复核？
+```
+
+但每个工具都有明确的输入、输出、前置条件和验证器，不能让模型直接“凭感觉改数据库”或“凭感觉判断文件大小”。
+
+---
+
+## 二、Agent 和确定性代码的职责边界
+
+### Agent 负责
+
+- 阅读最新采集需求；
+- 把需求转换为 `RequirementSpec`；
+- 识别需求中的歧义和未定义项；
+- 判断当前应该盘点哪个来源、处理哪批资源；
+- 根据文件类型和解析结果选择下一步工具；
+- 处理解析失败、字段变化、目录结构变化；
+- 对大学教育属性、学科属性、资料类型做语义判断；
+- 选择候选文档和人工复核样本；
+- 组织 query 生成和报告交付；
+- 在任务中断后根据账本恢复工作。
+
+### 确定性工具负责
+
+- 读取云盘资源清单；
+- 下载或导出文件；
+- 判断真实 MIME、文件大小、页数；
+- 计算 SHA-256 和正文指纹；
+- 抽取字符数、词数、页码和表格信息；
+- 执行硬性大小限制；
+- 生成结构化记录；
+- 防止重复下载和重复处理；
+- 校验 query 数量、题型数量和题量限制；
+- 保存来源证据；
+- 阻止删除或修改原始云盘文件。
+
+这就是“Agent 占大头”，但不是“Agent 取代事实系统”。
+
+**Agent 可以决定调用哪个工具，但不能决定工具返回什么事实。**
+
+OpenAI 关于 harness engineering 的总结也是类似方向：人的主要职责从逐行编码转向定义意图、设计环境和反馈回路，Agent 负责执行；系统本身需要具备可理解性、验证和持续反馈机制。([openai.com](https://openai.com/index/harness-engineering/))
+
+---
+
+## 三、可以借鉴 OpenClaw，但不建议直接把 OpenClaw 当业务内核
+
+OpenClaw 的几个设计非常适合借鉴：
+
+| OpenClaw 概念 | 本项目对应设计 |
+|---|---|
+| Gateway | 采集任务控制面 |
+| Agent Runtime | 采集 Agent Harness |
+| Skill | 采集策略和操作手册 |
+| Plugin | 云盘、解析器、LLM、导出器等能力插件 |
+| Agent Loop | 观察、规划、调用工具、验证、继续 |
+| Lobster | 带审批和恢复能力的副作用操作 |
+| Task Flow | 可跨重启恢复的批处理任务 |
+| Memory | 操作偏好、历史决策和异常经验 |
+| SQLite / Artifacts | 真正的运行账本和数据事实 |
+
+OpenClaw 的 Runtime、Session、Skills、Tool Policy 和 Plugin SDK 是相互分离的；它的官方文档也把“Agent loop”定义为接收任务、组装上下文、模型推理、工具执行、持久化的循环。([docs.openclaw.ai](https://docs.openclaw.ai/agent-runtime-architecture))
+
+其中 **Lobster** 的思路尤其适合我们：把副作用操作包装成有类型的多步流程，支持显式审批和 resume token，而不是让 Agent 直接连续执行不可逆动作。([docs.openclaw.ai](https://docs.openclaw.ai/tools/lobster))
+
+但是我不建议当前直接把整个 OpenClaw 作为业务核心，原因有两个：
+
+1. 它包含 Gateway、消息通道、Agent Runtime、插件、自动化等较大的产品面；
+2. OpenClaw 官方文档明确说明 Plugin SDK API 仍属于 experimental，直接绑定其内部运行时会把兼容性风险引入我们的核心系统。([docs.openclaw.ai](https://docs.openclaw.ai/plugins/sdk-overview))
+
+更合理的方式是：
+
+> **实现一个 OpenClaw-like 的窄版 Harness，借鉴它的边界和运行模型；以后可以把它接入 OpenClaw，而不是反过来把业务代码嵌进 OpenClaw 内部。**
+
+---
+
+## 四、最关键的设计：需求文档也作为 Agent 输入
+
+不要把在线文档直接手工翻译成大量硬编码规则，而是增加一个：
+
+```text
+Requirement Compiler
+```
+
+每次运行时：
+
+1. 读取当前在线文档；
+2. 固定文档 revision；
+3. Agent 提取需求；
+4. 输出结构化 `RequirementSpec`；
+5. 标记：
+   - 已确认要求；
+   - 可配置指标；
+   - 未定义项；
+   - 需要人工确认的冲突；
+6. 通过验证后，生成本次运行的任务契约。
+
+例如：
+
+```json
+{
+  "requirement_revision": 198,
+  "sources": [],
+  "languages": [],
+  "hard_constraints": [],
+  "soft_targets": [],
+  "query_policy": {},
+  "review_gates": [],
+  "unknowns": []
+}
+```
+
+这样以后发生变化时：
+
+- 新增云盘文件夹：改需求文档，不改主流程；
+- 语种配额变化：更新 `RequirementSpec`；
+- query 数量变化：更新任务契约；
+- 新增文件格式：Agent 发现当前没有对应能力，进入“能力缺口”状态；
+- 规则存在歧义：Agent 不自行猜，而是挂起等待确认。
+
+这正是 Anthropic 在长运行 Agent 设计中强调的方向：跨上下文工作不能只依赖聊天历史，必须通过结构化任务、交接产物和可验证状态传递上下文。([anthropic.com](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents))
+
+---
+
+## 五、Loop 不应该是无限 ReAct，而应该是有终止条件的任务循环
+
+建议采用下面的通用 Agent Loop：
+
+```text
+Observe
+  ↓
+Plan
+  ↓
+Act
+  ↓
+Verify
+  ↓
+Checkpoint
+  ↓
+Continue / Ask Human / Stop
+```
+
+每轮循环只处理一个明确目标，例如：
+
+- 找出还缺英语候选的来源；
+- 核验一批在线 Docx 的真实大小；
+- 对一组疑似重复文件进行正文比对；
+- 检查某批阿拉伯语 PDF 的文本顺序；
+- 补齐 P1 临床医学候选；
+- 重试上一批下载失败的资源。
+
+必须定义终止条件：
+
+```text
+quota_met
+source_exhausted
+no_new_eligible_documents
+needs_human_decision
+budget_exceeded
+time_limit_reached
+verification_failed
+```
+
+Anthropic 对 loop engineering 的定义也是“Agent 持续循环，直到满足停止条件”，重点不只是让模型多跑几轮，而是设计触发条件、停止条件和适合的任务边界。([claude.com](https://claude.com/blog/getting-started-with-loops))
+
+---
+
+## 六、数据源和业务变化时，维护成本会落在哪里
+
+目标不是让维护成本消失，而是把它限制在可控边界内：
+
+| 变化类型 | 主要维护位置 |
+|---|---|
+| 新增或更换云盘 | `Source Adapter` |
+| 云盘字段变化 | 适配器的 schema mapping |
+| 新增 DOC/PPT/在线资源 | `Extractor Plugin` |
+| 文件大小限制变化 | RequirementSpec / Verifier |
+| 语种和学科配额变化 | RequirementSpec |
+| query 结构变化 | Query Tool Contract |
+| LLM 厂商变化 | Model Adapter |
+| Agent Runtime 变化 | Harness Adapter |
+| 审核口径变化 | Evaluator / Eval Cases |
+
+核心 Loop、运行账本、工具调用协议和审计模型不应该跟着每次业务调整重写。
+
+另外，业务需求变化不应该直接允许 Agent 自动修改代码。更稳妥的过程是：
+
+```text
+需求变更
+  ↓
+Agent 提出 RequirementSpec diff
+  ↓
+自动检查影响范围
+  ↓
+人工确认
+  ↓
+新版本策略进入下一次运行
+```
+
+这比“让 Agent 自己修改整个 workflow”更安全，也更容易追责。
+
+---
+
+## 七、技术路径怎么选
+
+### 方案 A：直接采用 OpenClaw
+
+适合：
+
+- 后续需要聊天入口；
+- 需要 24/7 heartbeat；
+- 需要多 Agent、任务流和插件市场；
+- 希望把采集任务变成可被自然语言驱动的个人/团队 Agent。
+
+不适合直接作为当前核心，因为它的平台面较大，插件 API 仍在演进，且我们现有解析和评测逻辑是 Python 体系。
+
+### 方案 B：LangGraph 作为 Agent Runtime
+
+如果一定要选一个现成的 Python Agent 编排框架，我会优先考虑 LangGraph。
+
+它支持：
+
+- 持久化；
+- Durable Execution；
+- Human-in-the-loop；
+- 流式输出；
+- 确定性步骤和 LLM 步骤混合；
+- 长运行 Agent 的断点恢复。([docs.langchain.com](https://docs.langchain.com/oss/python/langgraph/overview))
+
+但不要把业务逻辑写成一张巨大的固定图。更好的用法是：
+
+```text
+LangGraph
+  └── 一个通用 Agent Loop
+        ├── Requirement Tools
+        ├── Source Tools
+        ├── Extraction Tools
+        ├── Review Tools
+        └── Verification Tools
+```
+
+### 方案 C：OpenAI Agents SDK
+
+OpenAI Agents SDK 已经提供 Agent Loop、Tools、Guardrails、Handoffs、Structured Outputs 和 Tracing，适合快速构建工具调用型 Agent。([openai.github.io](https://openai.github.io/openai-agents-python/))
+
+但当前项目已经使用多模型/多厂商调用方式，因此不建议让 OpenAI Agents SDK 成为唯一运行时。可以把它作为一种可插拔 Runtime。
+
+### 方案 D：Temporal
+
+Temporal 更适合：
+
+- 多机部署；
+- 7×24 运行；
+- 大量长任务；
+- 强事务性；
+- 需要跨服务恢复；
+- 多团队共享任务基础设施。
+
+它本身是 Durable Execution 平台，不是 Agent Framework。当前采集规模还不需要一开始就引入 Temporal。未来如果任务量、并发和运行时长明显扩大，可以把现在的 Tool/Artifact/Verifier 契约迁移过去。([docs.temporal.io](https://docs.temporal.io/))
+
+---
+
+## 八、我的最终建议
+
+我建议采用下面这条路线：
+
+> **Runtime-neutral Agent Harness + Typed Tools + Requirement Compiler + Evaluators + OpenClaw-compatible Skill/Plugin Surface**
+
+具体来说：
+
+1. **保留 Python 作为能力实现层**；
+2. **不再把固定采集流程作为系统核心**；
+3. 实现一个通用 Agent Loop；
+4. 将云盘、解析、去重、筛选、query 生成封装成工具；
+5. 所有工具采用稳定的输入输出契约；
+6. 运行状态采用事件账本和可恢复任务记录；
+7. 需求文档由 Agent 编译成版本化任务契约；
+8. hard rules 和事实计算由 Verifier 控制；
+9. Agent 负责动态规划和异常处理；
+10. 后续可以接 LangGraph、OpenClaw 或 OpenAI Agents SDK，但不让业务层绑定其中任何一个。
+
+可以把它理解为：
+
+```text
+OpenClaw-like 控制面
++ Python 文档能力插件
++ LangGraph-compatible Loop
++ Lobster-like 审批与恢复
++ Evaluator 驱动的质量闭环
+```
+
+## 九、验证“维护成本是否真的降低”
+
+在正式开发前，建议做一个小型架构 Spike，不是先处理全部文件，而是测试三类变化：
+
+1. **数据源变化**  
+   新增一个文件夹、修改目录层级、增加在线 Docx。
+
+2. **业务需求变化**  
+   修改语种配额、query 数量和题型配置。
+
+3. **格式变化**  
+   加入 DOC、PPT 或一种新的在线资源类型。
+
+观察以下指标：
+
+- 变化后是否只需改适配器或需求文档；
+- 是否需要修改核心 Agent Loop；
+- 是否能够从中断处恢复；
+- hard rule 是否仍然 100% 可验证；
+- Agent 是否会正确识别未知项并请求人工确认；
+- 人工复核量是否下降；
+- 单次运行成本和耗时是否可接受。
+
+**结论状态：这条 Agent-first 路线比上一版 workflow-first 更适合需求和数据源频繁变化，但目前仍是“较优、尚未证实”。**  
+最小判别实验不是先做完整采集，而是验证上述三类变化能否在不修改核心 Loop 的情况下完成。
+
+### 参考源
+
+- OpenAI：Harness engineering，重点是 Agent-first、系统可理解性、反馈回路和人机职责重分配。([openai.com](https://openai.com/index/harness-engineering/))
+- Anthropic：Loop engineering，关于触发方式、停止条件和不同类型 Agent Loop。([claude.com](https://claude.com/blog/getting-started-with-loops))
+- Anthropic：长运行 Agent Harness，关于跨上下文交接、结构化产物、规划器/执行器/评估器。([anthropic.com](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents))
+- OpenClaw：Agent Runtime Architecture，关于 Runtime、Session、Skills、Plugins 和 Harness 分层。([docs.openclaw.ai](https://docs.openclaw.ai/agent-runtime-architecture))
+- OpenClaw：Lobster 和 Task Flow，关于类型化流程、审批、恢复 token 和持久任务状态。([docs.openclaw.ai](https://docs.openclaw.ai/tools/lobster))
+- OpenClaw：Why OpenClaw，关于可信 Gateway、非可信执行、确定性策略和版本化状态。([docs.openclaw.ai](https://docs.openclaw.ai/start/why-openclaw))
+- LangGraph：关于 Durable Execution、持久化、人机协作以及确定性步骤和 LLM 步骤混合。([docs.langchain.com](https://docs.langchain.com/oss/python/langgraph/overview))
+- OpenAI Agents SDK：关于 Tools、Guardrails、Handoffs 和 Tracing。([openai.github.io](https://openai.github.io/openai-agents-python/))
+- Temporal：关于跨重启恢复、重试、任务队列和长时间运行工作流。([docs.temporal.io](https://docs.temporal.io/))
