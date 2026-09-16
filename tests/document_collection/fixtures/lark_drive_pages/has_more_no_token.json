@@ -1,0 +1,27 @@
+{
+  "ok": true,
+  "identity": "user",
+  "data": {
+    "files": [
+      {
+        "created_time": "1700000000",
+        "modified_time": "1700000001",
+        "name": "orphelin.pdf",
+        "owner_id": "ou_fixtureowner",
+        "parent_token": "ROOT",
+        "token": "TOK_X1",
+        "type": "file",
+        "url": "https://example.feishu.cn/file/TOK_X1"
+      }
+    ],
+    "has_more": true
+  },
+  "_notice": {
+    "update": {
+      "command": "lark-cli update",
+      "current": "1.0.85",
+      "latest": "1.0.85",
+      "message": "fixture"
+    }
+  }
+}
