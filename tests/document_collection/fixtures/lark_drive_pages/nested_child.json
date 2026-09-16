@@ -1,0 +1,47 @@
+{
+  "ok": true,
+  "identity": "user",
+  "data": {
+    "files": [
+      {
+        "created_time": "1700000000",
+        "modified_time": "1700000001",
+        "name": "td_physique.docx",
+        "owner_id": "ou_fixtureowner",
+        "parent_token": "TOK_SUB",
+        "token": "TOK_N1",
+        "type": "file",
+        "url": "https://example.feishu.cn/file/TOK_N1"
+      },
+      {
+        "created_time": "1700000000",
+        "modified_time": "1700000001",
+        "name": "donnees.csv",
+        "owner_id": "ou_fixtureowner",
+        "parent_token": "TOK_SUB",
+        "token": "TOK_N2",
+        "type": "file",
+        "url": "https://example.feishu.cn/file/TOK_N2"
+      },
+      {
+        "created_time": "1700000000",
+        "modified_time": "1700000001",
+        "name": "tablica",
+        "owner_id": "ou_fixtureowner",
+        "parent_token": "TOK_SUB",
+        "token": "TOK_N3",
+        "type": "sheet",
+        "url": "https://example.feishu.cn/file/TOK_N3"
+      }
+    ],
+    "has_more": false
+  },
+  "_notice": {
+    "update": {
+      "command": "lark-cli update",
+      "current": "1.0.85",
+      "latest": "1.0.85",
+      "message": "fixture"
+    }
+  }
+}
