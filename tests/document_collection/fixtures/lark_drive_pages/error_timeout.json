@@ -1,0 +1,17 @@
+{
+  "ok": false,
+  "identity": "user",
+  "error": {
+    "type": "network",
+    "subtype": "timeout",
+    "message": "timeout after 180s"
+  },
+  "_notice": {
+    "update": {
+      "command": "lark-cli update",
+      "current": "1.0.85",
+      "latest": "1.0.85",
+      "message": "fixture"
+    }
+  }
+}
