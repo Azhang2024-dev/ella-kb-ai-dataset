@@ -1,0 +1,8 @@
+{
+  "llm_provider": "openai",
+  "llm_model": "",
+  "llm_api_key": "",
+  "llm_base_url": "",
+  "llm_temperature": 0.3,
+  "thinking_mode": "auto"
+}
