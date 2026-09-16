@@ -1,0 +1,397 @@
+{
+  "schema_version": "0.1",
+  "policy_name": "ella-docqa-collection",
+  "generated_at": "2026-09-09",
+  "generated_by": "Task 0 基线固化（两周 MVP 计划）",
+  "requirement_revisions": {
+    "collection_plan_doc": {
+      "title": "内部需求文档（已脱敏）",
+      "token": "REDACTED_DOC_039",
+      "url": "REDACTED_FEISHU_URL",
+      "revision_id": 201,
+      "verified_at": "2026-09-09",
+      "verified_by": "lark-cli docs +fetch --doc-format markdown --detail full"
+    },
+    "primary_requirement_doc": {
+      "title": "内部需求文档（已脱敏）",
+      "token": "REDACTED_DOC_074",
+      "url": "REDACTED_FEISHU_URL",
+      "revision_id": 428,
+      "note": "取自 2026-09-09 本地快照 requirements_primary_20260909.json"
+    },
+    "multi_format_requirement_doc": {
+      "title": "内部需求文档（已脱敏）",
+      "token": "OtdnwZwPaiOhHfk43mYcpuAOndg",
+      "url": "REDACTED_FEISHU_URL",
+      "revision_id": 1140,
+      "note": "draft v0.2；4.1.2 规定字数与大小要求"
+    }
+  },
+  "sources": [
+    {
+      "name": "知识库_2026",
+      "kind": "lark_drive_folder",
+      "token": "REDACTED_DOC_007",
+      "url": "REDACTED_FEISHU_URL",
+      "role": "primary",
+      "readonly": true,
+      "known_non_folder_count": 3818,
+      "known_subfolder_count": 20
+    },
+    {
+      "name": "docQA.llm",
+      "kind": "lark_drive_folder",
+      "token": "REDACTED_DOC_029",
+      "url": "REDACTED_FEISHU_URL",
+      "role": "supplement",
+      "readonly": true,
+      "known_non_folder_count": 1074,
+      "known_subfolder_count": 41
+    }
+  ],
+  "source_access": {
+    "adapter": "lark_cli",
+    "readonly": true,
+    "lark_cli_path": "lark-cli",
+    "page_size": 200,
+    "max_depth": 10,
+    "request_timeout_sec": 180,
+    "max_retries": 3,
+    "retry_backoff_sec": [
+      2,
+      5,
+      10
+    ],
+    "max_concurrency": 1,
+    "inter_call_delay_sec": 0.2,
+    "known_limitation": "drive files list 与 drive metas batch_query 均不返回文件大小，remote_size 只能为 null，大小门槛改为下载后按本地字节数判定"
+  },
+  "formats": {
+    "allowed_extensions": [
+      "pdf",
+      "txt",
+      "md",
+      "docx",
+      "pptx",
+      "xlsx",
+      "csv"
+    ],
+    "priority_1": [
+      "pdf",
+      "txt",
+      "md",
+      "docx"
+    ],
+    "priority_2": [
+      "pptx",
+      "xlsx",
+      "csv"
+    ],
+    "conversion_required_extensions": [
+      "doc",
+      "ppt",
+      "xls"
+    ],
+    "excluded_extensions": [
+      "jpg",
+      "jpeg",
+      "png",
+      "gif",
+      "bmp",
+      "zip",
+      "rar",
+      "7z",
+      "exe",
+      "html",
+      "htm",
+      "url"
+    ],
+    "online_type_export": {
+      "docx": "docx",
+      "doc": "docx",
+      "sheet": "xlsx",
+      "slides": "pptx",
+      "bitable": "xlsx",
+      "wiki": "docx"
+    },
+    "online_types_pending_size": [
+      "docx",
+      "doc",
+      "sheet",
+      "slides",
+      "bitable",
+      "wiki"
+    ],
+    "online_export_notes": "实测：在线 sheet / bitable 导出 csv 需要 --sub-id 指定子表，批量场景拿不到，统一改用 xlsx；在线 docx 导出 docx 偶发 code=600 hybrid resource expired，属可重试，重试耗尽后标 pending_export。"
+  },
+  "size_limits_mb": {
+    "pdf": 100,
+    "doc": 100,
+    "docx": 100,
+    "ppt": 100,
+    "pptx": 100,
+    "xlsx": 20,
+    "xls": 20,
+    "csv": 20,
+    "txt": 20,
+    "md": 20
+  },
+  "online_size_policy": "pending_size_verification",
+  "languages": {
+    "p0": [
+      "en",
+      "ru",
+      "fr",
+      "zh",
+      "ar",
+      "es"
+    ],
+    "p1_extra": [],
+    "min_documents_per_language": 20,
+    "english_single_bucket": true,
+    "folder_aliases": {
+      "en": ["DOC-EN", "english"],
+      "zh": ["DOC-ZH", "Chinese"],
+      "fr": ["DOC-FR", "French", "french"],
+      "ru": ["DOC-RU", "russian"],
+      "ar": ["DOC-AR", "arabic"],
+      "es": ["DOC-ES", "spanish"]
+    },
+    "folder_aliases_note": "源目录名到 P0 语种的映射，供 acquire --language 定向采集用（下载前只能靠目录名判语种；正文语种在 extract 阶段才可靠）。改目录命名时同步改这里。",
+    "out_of_scope_action": "reject",
+    "ambiguous_action": "needs_review",
+    "min_confidence_for_accept": 0.7,
+    "min_confidence_by_language": {
+      "zh": 0.55,
+      "ru": 0.55,
+      "ar": 0.55
+    },
+    "min_confidence_by_language_note": "非拉丁脚本语种（zh/ru/ar）靠字形占比识别，证据本身就比拉丁语系的虚词命中更硬；实测 42 条 language_ambiguous 中约半数是正文正常的 zh/ru 学术文档（中英混排/带公式）被 0.70 门槛误拦。对这三个语种单独降到 0.55，其余语种仍用 min_confidence_for_accept（0.70）。",
+    "confidence_note": "真实 Pilot 实测：一份 128 页斯瓦希里语博士论文只命中少量西班牙语虚词，被判成 es（置信度 0.54）并误放行；两份乌尔都语文档被判成 ar，一份孟加拉语文档被判成 en。语种识别必须同时做两件事才可靠：1) 补齐数据源里真实存在的语种（sw/ur/bn/ta/gu/id/tl/ha 等）；2) 放行门槛提高到 0.70，低于门槛的一律转 needs_review，既不把范围外语种放进最终集，也不把低置信度样本直接淘汰掉。",
+    "detected_out_of_scope_languages": [
+      "sw",
+      "ur",
+      "bn",
+      "ta",
+      "gu",
+      "id",
+      "tl",
+      "ha",
+      "pa",
+      "te",
+      "kn",
+      "ml",
+      "si",
+      "my",
+      "km",
+      "lo",
+      "bo",
+      "ka",
+      "hy",
+      "am",
+      "ja",
+      "ko",
+      "he",
+      "th",
+      "el",
+      "hi",
+      "pt",
+      "de",
+      "it",
+      "tr",
+      "vi"
+    ]
+  },
+  "subjects": {
+    "p0": [
+      "economics_management_accounting_finance",
+      "computer_science_it",
+      "mathematics_statistics"
+    ],
+    "p1": [
+      "law",
+      "education_linguistics",
+      "clinical_medicine_nursing",
+      "basic_science"
+    ],
+    "p1_min_documents_each": 1,
+    "p1_total_min": 4,
+    "gate": {
+      "enabled": true,
+      "unknown_action": "needs_review",
+      "note": "学科范围门禁：需求 3.1 把\"学科属于 P0 或 P1\"列为必须满足的硬条件。enabled=true 时，模型判定的学科不在 P0∪P1 集合内一律淘汰；unknown 按 unknown_action 落（needs_review=交人工，不误杀）。历史缺陷：subject 曾被当作纯展示用配比维度，导致心理学/社会学/艺术学等范围外文档进入交付（180 份里 55% 学科越界）。"
+    }
+  },
+  "content_rules": {
+    "exclude_graphics_dominated": true,
+    "keep_text_tables_formulas": true,
+    "graphics_understanding_max_pages": 20,
+    "graphics_understanding_weekly_quota": 3,
+    "graphics_understanding_default_path": false,
+    "fast_read_char_window": 50000,
+    "full_text_review_threshold_chars": 50000,
+    "prompt_text_chars": 50000,
+    "prompt_text_chars_note": "喂给模型的正文窗口上限（字符）。端侧/云侧入库窗口同为 5 万，评测输入窗口与此对齐：5 万字符 ≈ 2.6 万 token（实测），远低于网关上下文上限。截断方式为头 50% + 中 25% + 尾 25% 抽样，静默截断会写进 query/出题产物（text_chars/prompt_chars/truncated），质量下限可见。",
+    "min_chars_for_query_generation": 800,
+    "min_text_ratio_for_pdf": 0.35,
+    "record_metrics": [
+      "char_count",
+      "word_count",
+      "cjk_char_count",
+      "text_ratio",
+      "page_count",
+      "is_long_document"
+    ]
+  },
+  "exclusions": {
+    "document_kinds": [
+      "news",
+      "brochure",
+      "annual_report",
+      "csr_report",
+      "industry_research_report",
+      "government_document",
+      "general_social_topic_article",
+      "qa_eval_sheet",
+      "eval_report",
+      "project_record",
+      "listing_file",
+      "confidential_consulting_report",
+      "business_report",
+      "unstable_scan",
+      "graphics_dependent"
+    ]
+  },
+  "query_plan": {
+    "queries_per_document": 10,
+    "single_type_query_count": 8,
+    "mixed_type_query_count": 2,
+    "whole_document_only": true,
+    "forbidden_reference_kinds": [
+      "fragment",
+      "chapter",
+      "section",
+      "page",
+      "sheet",
+      "table"
+    ],
+    "question_count_min": 2,
+    "question_count_max": 11,
+    "question_counts_should_not_repeat": true,
+    "language_follows_document": true,
+    "max_style_repeat": 3,
+    "max_style_repeat_note": "同一份文档内，同一个 query 开场句式最多重复次数。需求要求\"句式类型不能过于重复\"，这些 query 要模拟真实用户出题的口吻。10 条 query 分 5 类题型，按题型换开场时每签名 2 次属正常；上限 3 既容得下合理复用，又能拦住\"10 条全用请根据本文档\"这种雷同（历史实测单一句式出现 33 次）。超过上限判 query_style_repeated 并自动带纠正提示重生成一次。",
+    "query_types": [
+      {
+        "type_key": "multiple_choice",
+        "type_zh": "选择题",
+        "count": 2,
+        "question_count": 5,
+        "usage": "normal_positive",
+        "compatibility_only": false
+      },
+      {
+        "type_key": "fill_in_blank",
+        "type_zh": "填空题",
+        "count": 2,
+        "question_count": 3,
+        "usage": "normal_positive",
+        "compatibility_only": false
+      },
+      {
+        "type_key": "short_answer",
+        "type_zh": "解答题",
+        "count": 2,
+        "question_count": 2,
+        "usage": "short_answer_per_product_rule",
+        "compatibility_only": false
+      },
+      {
+        "type_key": "true_false",
+        "type_zh": "判断题",
+        "count": 2,
+        "question_count": 7,
+        "usage": "normal_positive",
+        "compatibility_only": false
+      },
+      {
+        "type_key": "mixed",
+        "type_zh": "混合题型",
+        "count": 2,
+        "question_count": 9,
+        "usage": "compatibility_only",
+        "compatibility_only": true,
+        "expected_behavior": "丢弃或降级处理"
+      }
+    ],
+    "min_knowledge_units_per_document": 10,
+    "keep_internal_locator_ledger": true
+  },
+  "deduplication": {
+    "scope": "cross_source_unified",
+    "exact_hash": true,
+    "normalized_text_hash": true,
+    "near_duplicate_action": "mark_only",
+    "keep_all_source_paths": true,
+    "prefer_rule": "higher_text_quality_then_clearer_education_signal_then_more_stable_locator",
+    "known_duplicate_dirs": [
+      "french+chinese+russian"
+    ]
+  },
+  "llm": {
+    "enabled": false,
+    "config_path": "config/llm_config.json",
+    "backend": "litellm",
+    "max_output_repair_retries": 1,
+    "max_tokens": 32000,
+    "max_tokens_note": "推理模型的 reasoning_tokens 计入 max_tokens。上一批 query 实测 16000 会把预算耗在推理上（finish_reason=length、正文空，3/180 条），调到 32000 后全部转 validated；出题（含解析）同样需要 32000。",
+    "temperature": null,
+    "scene": "docqa_collection",
+    "boundary_items_only": true,
+    "hard_failure_override_allowed": false,
+    "record_call_count_and_cost": true
+  },
+  "question_generation": {
+    "enabled": true,
+    "max_tokens": 32000,
+    "temperature": 0.3,
+    "artifact_dir": "questions",
+    "prompt_text_chars": 50000,
+    "note": "参考题目生成（题干/选项/答案/解析）。输入窗口与 query 一致（content_rules.prompt_text_chars），产物契约对齐 query：questions/<item_id>.json + question_records.jsonl + question_summary.json，并同时 upsert 到状态库 questions 表。"
+  },
+  "run_defaults": {
+    "dry_run": false,
+    "approval_mode": "read_only",
+    "workspace_dir": "output/document_collection",
+    "artifact_layout": "sha256",
+    "resume_enabled": true
+  },
+  "safety": {
+    "source_readonly": true,
+    "forbidden_operations": [
+      "delete",
+      "move",
+      "rename",
+      "modify",
+      "upload",
+      "create_folder",
+      "create_shortcut",
+      "secure_label_update"
+    ],
+    "allowlisted_lark_commands": [
+      "drive files list",
+      "drive metas batch_query",
+      "drive +inspect",
+      "drive +download",
+      "drive +export"
+    ],
+    "never_log": [
+      "access_token",
+      "tenant_access_token",
+      "user_access_token",
+      "app_secret",
+      "llm_api_key",
+      "mineru_token"
+    ]
+  }
+}
