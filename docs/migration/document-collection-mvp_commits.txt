@@ -1,0 +1,600 @@
+commit 82f7049e7aa378a400248d3eeeb6edfbd14942c7
+Author: admin <admin@local>
+Date:   2026-09-09 22:42:40 +0800
+
+    docs(document_collection): 开发日志收尾 —— D5 前后对照、DoD 验收对照、目录结构差异说明
+    
+    三处补强，都是"留档"要求里最容易被省掉、但事后最难重建的部分：
+    
+    1. D5 的前后对照数据。第一次盘点（修复前）raw=3478 errors=11 且退出码为 0，
+       修复后 6 次运行全部 raw=4892 errors=0。少了 1414 条（29%）却没有任何报错，
+       这就是它被列为最严重缺陷的原因；同时 6 次一致也反证了云盘源未被改动。
+    
+    2. 计划第 12 节 Definition of Done 的逐条验收对照表，每条都写明证据出处。
+    
+    3. 与计划第 5 节目录结构的差异说明。计划要求的 28 个文件全部存在，
+       另外新增 12 个模块/测试文件，逐个写明"计划里为什么没有、现在为什么必须有"，
+       包括 .gitignore 的两处改动及其原因（scripts/ 整体忽略导致无法 re-include，
+       必须改成 scripts/* 才能让例外生效）。
+    
+    同时补 repro-v6 的配额缺口数据（P0 六语种 29/120，P1 学科全 0 因为未启用语义复核，
+    属预期行为而非缺陷），以及按 80 条均匀样本合格率推算的定向采集规模建议。
+
+ ...274\200\345\217\221\346\227\245\345\277\227.md" | 50 ++++++++++++++++++++++
+ 1 file changed, 50 insertions(+)
+
+commit a4d1551dd4ea66d56af5d8928dd92132ea783aa6
+Author: admin <admin@local>
+Date:   2026-09-09 22:39:33 +0800
+
+    docs(document_collection): Skill 补 audit 命令与交付前门禁说明，manifest 增加 diagnostics 段
+    
+    - SKILL.md：命令表补 explain / audit 两个只读诊断命令；
+      新增「交付前必须跑 audit」小节，列出 5 个检查点各自验什么，
+      以及检查点 5 的已知口径（在线导出产物不具备字节级可复现性，
+      audit 只披露不判失败；下载类必须逐字节一致）。
+    - capability-manifest.json：新增 diagnostics 段，明确 explain / audit
+      不属于 8 个契约能力、副作用为空或仅 write_local、不需要模型；
+      并把导出产物字节不稳定的实测结论写进 known_limitation。
+      exit_codes["1"] 补上「audit 有任何一条检查点不通过也返回 1」。
+    
+    回归：test_skill_scenarios.py 的文档一致性用例仍然全绿
+    （capabilities 数组与 contracts.CAPABILITY_NAMES 逐项一致，diagnostics 是独立段）。
+
+ skills/document_collection/SKILL.md                | 22 +++++++++++++++
+ .../document_collection/capability-manifest.json   | 32 ++++++++++++++++++++--
+ 2 files changed, 52 insertions(+), 2 deletions(-)
+
+commit 842cf7631045b7c80035ce0027e8fbe9b3595822
+Author: admin <admin@local>
+Date:   2026-09-09 22:39:15 +0800
+
+    fix(document_collection): Windows 长路径(D20) + 采集完整性校验(D22) + stage 键统一(D21) + 报告口径
+    
+    D20 Windows MAX_PATH：内容寻址文件名撞 260 字符上限
+    - 现象：深层工作区下 shutil.move 抛 WinError 3。artifacts/<sha[:2]>/<sha64>.<ext>
+      光文件名就 68 字符，仓库路径稍深就突破上限。本项目第三次踩同类坑。
+    - 修复：新增 core/document_collection/winpath.py，对真正调用 OS 的地方统一加
+      \\?\ 扩展长度前缀（上限约 32767）；写进库和报告的路径仍是普通可读形式。
+      覆盖 acquisition / extraction / 5 个抽取器 / local_files / lark_cli / recorded /
+      state（含 sqlite3.connect）/ inventory / screening / deduplication /
+      query_generation / reporting / service / audit / cli 的 run 目录扫描。
+    - 反直觉事实：超过 260 字符的文件确实存在，但普通 os.path.isfile 看不见它。
+      所以运维上仍建议工作区放浅路径（资源管理器打不开）。
+    
+    D22 计划 Task 3 要求的三种失败分支没有用例，顺带发现产品侧确实没做完整性校验
+    - 服务端声明的 size_bytes 从未与落盘字节数比对 -> 截断会被当成完整文件；
+    - 只在临时目录算过一次 SHA-256，移动到内容寻址位置后没有复核。
+    - 修复：声明字节数不一致 -> acquire_failed(truncated_transfer) 并删残file；
+      拿不到声明值时如实标 declared_size_unavailable，不假装校验过；
+      落盘后重算 SHA-256，不一致 -> acquire_failed(checksum_mismatch_after_store)；
+      OSError（磁盘满/权限/路径不存在）逐条捕获，整批不崩。
+    
+    D21 stage_state_json 出现两套键名
+    - 阶段模块用短名（acquire），CoreService 用能力全名（collection.acquire），
+      D18 改成合并后 12 个键并存。统一为能力全名，与 contracts/manifest 一致。
+    
+    报告口径修复
+    - 格式软目标表原先只列 6 个桶，在线 Docx/Sheet/Slides 被接受后不加总，
+      表格合计 26 而 accepted 是 29，业务方会以为报告漏算。
+      现在补出软目标为 — 的行并给出合计。
+    
+    测试新增
+    - test_acquisition_failures.py（10 项）：截断、校验和不一致、磁盘满/权限、
+      深层工作区全链路、声明字节数有无两种情况
+    - test_pipeline_e2e.py 增加 stage_state 键名与完整性断言
+    
+    真实数据验证
+    - repro-v6 / repro-v7 用同一代码同一 seed 完整跑两遍，
+      audit --compare-with 19/19 全 PASS（下载类产物 60/60 逐字节一致、
+      确定性阶段决策 220/220 一致、盘点计数一致、筛选决策 80/80 一致）
+    - repro-v7 重新出报告：accepted 29，格式表合计与 accepted_total 对齐
+    
+    验证：pytest tests/document_collection -> 356 passed；ruff F,E9 清零
+
+ core/document_collection/acquisition.py            |  87 +++++--
+ core/document_collection/adapters/lark_cli.py      |   9 +-
+ core/document_collection/adapters/local_files.py   |  23 +-
+ core/document_collection/adapters/recorded.py      |  11 +-
+ core/document_collection/audit.py                  |   5 +-
+ core/document_collection/cli.py                    |  11 +-
+ core/document_collection/deduplication.py          |  11 +-
+ core/document_collection/extraction.py             |  23 +-
+ core/document_collection/extractors/docx.py        |   6 +-
+ core/document_collection/extractors/pdf.py         |   6 +-
+ core/document_collection/extractors/pptx.py        |   6 +-
+ core/document_collection/extractors/text.py        |   6 +-
+ core/document_collection/extractors/xlsx.py        |   7 +-
+ core/document_collection/inventory.py              |  19 +-
+ core/document_collection/query_generation.py       |  17 +-
+ core/document_collection/reporting.py              |  28 ++-
+ core/document_collection/screening.py              |  15 +-
+ core/document_collection/service.py                |  11 +-
+ core/document_collection/state.py                  |   7 +-
+ core/document_collection/textstats.py              |   4 +-
+ core/document_collection/winpath.py                |  92 ++++++++
+ ...274\200\345\217\221\346\227\245\345\277\227.md" | 209 ++++++++++++++++-
+ docs/document_collection_scope.md                  |  57 ++++-
+ tests/document_collection/conftest.py              |   9 +-
+ .../test_acquisition_failures.py                   | 249 +++++++++++++++++++++
+ tests/document_collection/test_pipeline_e2e.py     |  18 ++
+ 26 files changed, 812 insertions(+), 134 deletions(-)
+
+commit e46d72cbeaf8ae44553bf4db6c39bf8a02a34de2
+Author: admin <admin@local>
+Date:   2026-09-09 22:11:32 +0800
+
+    fix(document_collection): audit 自身暴露的两个缺陷（D18 阶段摘要被覆盖 / D19 导出产物字节不稳定）
+    
+    用 audit --compare-with 对比两次真实 Pilot（v4 vs v5）时，检查点 5 报了 3 个 FAIL。
+    逐条查证后，2 个是 audit 自身/状态层的真缺陷，1 个是两次运行代码不同导致的预期差异。
+    
+    D18　stage_state_json 被覆盖，阶段摘要只剩最后一步
+    - 现象：v4 的 runs.stage_state_json 只有 {"collection.report": ...}，
+      v5 只有 {"collection.audit": ...}，inventory/acquire/extract/dedup/screen 的摘要全丢。
+    - 根因：每条 CLI 命令都是独立进程，内存里的 stage_summaries 只有自己这一个阶段；
+      StateStore.touch_run() 直接整体覆盖 stage_state_json。
+    - 影响面：cost_and_runtime.json 的 stages、resume 的阶段视图、
+      audit 判断"是否启用过语义复核"全部失真 —— audit 因此把启用了模型的运行
+      当成未启用，错误地强制要求筛选决策逐字一致。
+    - 修复：touch_run 改为读出现有 JSON 后合并写入，同阶段再写则更新。
+    - 回归：test_touch_run_merges_stage_state_instead_of_overwriting、
+      test_audit_after_report_still_sees_the_screen_stage。
+    
+    D19　在线资源导出产物不具备字节级可复现性
+    - 现象：v4 与 v5 的 70 个产物里有 10 个 SHA-256 不同。
+    - 查证：按 acquire_mode 分组后，**60 个 download 全部逐字节一致**，
+      **10 个 export 全部不同**，且字节数只差几个 byte
+      （58435 vs 58471、282343 vs 282327、82106 vs 82105 ...）。
+      结论：drive +export 每次由服务端重新渲染，输出不是字节稳定的。
+    - 处理：audit 把产物哈希检查拆成两条
+      * 「下载类产物的 SHA-256 逐字节一致」-> 硬检查；
+      * 「导出类产物字节不稳定属已知事实（仅披露）」-> 列出差异 item_id，不判失败。
+      理由：如果把它判失败，检查点 5 会永远红，真正的确定性回归反而被淹没。
+      正文级去重用的是规范化文本指纹，不受字节抖动影响。
+    - 回归：test_exported_artifacts_are_disclosed_not_failed。
+    
+    第 3 个 FAIL（条目状态计数 / 筛选决策不一致）是预期差异：
+    v4 用的是语种修复前的代码，v5 用的是修复后的代码，
+    accepted 从 5 变 6（斯瓦希里语论文被正确拦下，同时若干原本 language_ambiguous
+    的条目现在能高置信度正确识别）。确定性阶段（acquire/extract/deduplicate）
+    220 条决策逐条一致，盘点计数完全一致 —— 这两项已经通过。
+    
+    验证：pytest tests/document_collection -> 345 passed；ruff F,E9 清零
+
+ core/document_collection/audit.py       | 33 +++++++++++++---
+ core/document_collection/state.py       | 33 +++++++++++++---
+ tests/document_collection/test_audit.py | 68 ++++++++++++++++++++++++++++++++-
+ 3 files changed, 123 insertions(+), 11 deletions(-)
+
+commit 045a934f468e00c7e4451fcd1347b032aa3ad001
+Author: admin <admin@local>
+Date:   2026-09-09 22:04:26 +0800
+
+    feat(document_collection): 验收门禁自检 audit 命令 + 判定原因分类（D17）
+    
+    计划第 9 节的 5 个检查点此前只能靠人工看 CSV，现在机械化：
+    
+    新增 core/document_collection/audit.py + CLI `audit` 子命令
+    （与 explain 一样是只读诊断，不属于 8 个契约能力）：
+      .venv\Scripts\python scripts\collection_cli.py --run-id <run> audit
+      .venv\Scripts\python scripts\collection_cli.py --run-id <run> audit --compare-with <另一次运行目录>
+    
+    检查点覆盖：
+    1 能运行      manifest 与 contracts 逐项一致；适配器协议不含任何写方法
+    2 盘点完整    无 has_more 缺 next_page_token 的漏项；两个源都用真实名称记录
+    3 没有误放行  超大小/不支持格式/采集硬拒绝被翻案/同组多条被接受/相同 SHA-256，
+                  六项必须全部为 0；云盘只读的结构性保证（策略+白名单+协议）
+    4 结果可解释  每条结论都有 status/reason_codes/source_path/artifact_path；
+                  每条淘汰都能给出单一 deciding_reason
+    5 可以复跑    与另一次运行对比产物哈希、条目计数、确定性阶段决策
+    
+    检查点 5 的关键设计：区分「确定性阶段」和「依赖模型的阶段」。
+    acquire/extract/deduplicate 必须逐条一致；screen 在启用语义复核时
+    模型输出不保证逐字一致，此时降级为"可比性"报告而不是判失败 ——
+    否则这条检查点会永远红，反而掩盖真正的确定性回归。
+    
+    同时修复 D17（覆盖报告把已通过的门禁当成淘汰原因）：
+    - contracts 显式分三类：POSITIVE_REASON_CODES / INFORMATIONAL_REASON_CODES / 真正的决定原因
+    - 新增 deciding_reason() 与 is_explanatory_reason()
+    - coverage_report.md 的原因分布只统计真正决定结论的原因
+    - all_decisions.csv、accepted/rejected/human_review_queue.csv 增加 deciding_reason 列
+    
+    audit 自身的缺陷也被测试抓到并修复：
+    _semantic_enabled() 读的是 stage_state_json["screen"]，
+    实际键名是能力全名 "collection.screen"，导致启用模型的运行被误判为未启用。
+    
+    测试：新增 tests/document_collection/test_audit.py（16 项）与 test_reporting.py（42 项）。
+    每个检查点都配了一个"故意做坏"的用例，确保门禁真的能抓到违规，而不是空转。
+    
+    验证：pytest tests/document_collection -> 342 passed；ruff F,E9 清零
+
+ core/document_collection/audit.py                  |  413 ++++++++
+ core/document_collection/cli.py                    |   14 +-
+ core/document_collection/contracts.py              |   39 +
+ core/document_collection/reporting.py              |   15 +-
+ core/document_collection/screening.py              |    5 +-
+ core/document_collection/service.py                |   32 +
+ ...274\200\345\217\221\346\227\245\345\277\227.md" |  546 ++++++++++
+ .../2026-09-09-agentic-document-collection-zh.md   | 1118 ++++++++++++++++++++
+ .../2026-09-09-agentic-document-collection.md      | 1116 +++++++++++++++++++
+ ...274\200\345\217\221\346\227\245\345\277\227.md" |  234 ++++
+ ...255\226\347\225\245\346\226\207\346\241\243.md" |  211 ++++
+ tests/document_collection/test_audit.py            |  252 +++++
+ tests/document_collection/test_reporting.py        |  178 ++++
+ 13 files changed, 4168 insertions(+), 5 deletions(-)
+
+commit 877edca25ae1cdd22d3550cdf6450f3654c8c4c8
+Author: admin <admin@local>
+Date:   2026-09-09 21:42:27 +0800
+
+    fix(document_collection): 语种识别误放行 —— 真实 Pilot 抓到的最严重业务风险
+    
+    现象（run pilot-20260909-v4，语义复核后 accepted 5 份）：
+    逐份人工核对 accepted 结果时发现 1 份明确误放行，另有 3 份潜在误放行：
+    - Swahili_1.pdf（128 页斯瓦希里语博士论文）被判成 es，置信度仅 0.54，
+      通过了 0.35 的旧门槛 -> 范围外语种被当成 P0 西班牙语收进最终集；
+    - 两份乌尔都语文档（قائد ملت.docx 等）被判成 ar -> 会污染阿拉伯语配额；
+    - bn_culture_literature_0013_document.pdf（孟加拉语）被判成 en。
+    
+    根因有两层：
+    1. 语种表只覆盖 P0 六语种 + 少数欧洲语言，而 docQA.llm 里真实存在
+       swahili/urdu/bengali/tamil/gujarati/marathi/hindi/hausa/filipino/
+       indonesian/turkish 等目录。识别不出它们时，拉丁文本会去命中
+       es/pt/it 的虚词表，阿拉伯字母文本会一律判成 ar。
+    2. 放行门槛 0.35 太低：0.54 这种"弱证据"也能直接进最终集。
+    
+    修复：
+    - textstats 新增 20 个 Unicode 脚本区间（孟加拉/泰米尔/古吉拉特/古木基/
+      奥里亚/泰卢固/卡纳达/马拉雅拉姆/僧伽罗/缅/高棉/老/藏/格鲁吉亚/
+      亚美尼亚/埃塞俄比亚/它拿/叙利亚 + 拉丁扩展附加），并建立脚本->语言映射；
+    - 乌尔都语用 55 个特有字母（ٹ پ ڈ ڑ ژ ں ے ک گ ہ ی 等）与阿拉伯语区分，
+      共用阿拉伯字母区不再是误判理由；
+    - 虚词表补 sw/id/tl/ha/vi 五种拉丁语系语言；
+    - 放行门槛提到 0.70，写进策略 languages.min_confidence_for_accept，
+      代码不再写死；P0 语种但置信度不足 -> needs_review（既不污染配额，
+      也不误杀真样本）；范围外语种且高置信 -> rejected。
+    
+    效果（对 v4 已抽取的 70 份正文重新识别，15 份结论改变）：
+      Swahili_1.pdf  es -> sw (1.0)      Swahili_21.docx  pt -> sw (1.0)
+      Swahili_6.txt  pt -> sw (1.0)      قائد ملت.docx     ar -> ur (1.0)
+      قرآن میں ...    ar -> ur (1.0)      bn_culture_...   en -> bn (1.0)
+      16-8.pdf       en -> gu (1.0)      14-7.pdf  unknown -> ta (1.0)
+      4.txt     unknown -> gu (1.0)      Majas.pptx        it -> id (0.89)
+      12.txt         en -> tl (1.0)      等
+    其中 4 份原本会被误放行进 P0 配额，现在全部被正确拦下。
+    
+    回归：
+    - test_textstats.py 新增 11 个范围外语种识别用例 + 乌尔都/阿拉伯区分 +
+      低置信度不得伪装成高置信度；
+    - test_screening.py 新增门槛来自策略、0.54 置信度必须转复核、
+      高置信范围外语种必须淘汰、调用方可覆盖门槛共 5 项。
+    - pytest tests/document_collection -> 284 passed；ruff F,E9 清零。
+    
+    其他：
+    - 采集记录 error 字段改为结构化（error_code/error_type/error_log_id）。
+    - 抽取成功也写正向 reason_code（D4 后续补强，已在上一次提交）。
+
+ config/collection_policy.json                      |  37 ++++++-
+ core/document_collection/config.py                 |   6 ++
+ core/document_collection/screening.py              |  22 +++-
+ core/document_collection/textstats.py              | 118 +++++++++++++++++----
+ tests/document_collection/test_acquisition.py      |   1 -
+ .../test_regression_real_world.py                  |   1 -
+ tests/document_collection/test_screening.py        |  40 +++++++
+ tests/document_collection/test_textstats.py        |  61 +++++++++++
+ 8 files changed, 260 insertions(+), 26 deletions(-)
+
+commit ad50757802ef9d3e346a84636c1f6d49892e71af
+Author: admin <admin@local>
+Date:   2026-09-09 21:06:09 +0800
+
+    fix(document_collection): 筛选范围与 LLM 开关两处真实 Pilot 缺陷
+    
+    第一次真实 Pilot（run pilot-20260909-v3，80 条分层样本）暴露：
+    
+    1. screen 默认跑全量 4892 条，其中 4812 条从未采集过。
+       它们没有任何证据可判，只能落到 needs_review(artifact_missing)，
+       结果 human_review_queue.csv 被 4800+ 条噪声淹没，人工复核队列不可用。
+       实测状态分布：needs_review 4830 / accepted 35 / rejected 21。
+       修复：默认只筛"有本地产物或有抽取记录"的条目，其余计入
+       skipped_unprocessed；需要全量时显式加 --include-unprocessed。
+       判据用证据而不是 status —— 因为 v3 那次全量跑已经把未采集条目的
+       status 改写成了 needs_review，用 status 判断会失效。
+    
+    2. CLI 的 screen --semantic / query 说"强制启用模型"，
+       但 CoreService.build_llm() 仍然只看策略里的 llm.enabled，
+       于是命令行明确要求启用却被策略静默关掉。
+       修复：build_llm(force_enabled=...) 穿透策略；query 增加 --llm；
+       run-all --semantic 同样穿透。
+    
+    真实 Pilot v3 已验证的部分（修复前数据，仅作对照）：
+    - inventory：4892 条唯一资源，与 v2 完全一致（可复现）
+    - acquire 80 条分层样本：acquired 70 / conversion_required 5 / rejected 4 / pending_export 1
+      （对比修复错误分类前的 v2：pending_export 19 -> 1，说明 code 600 重试生效）
+    - extract：70/70 全部抽取成功
+    - deduplicate：重复 1 条，唯一 69 条
+    
+    验证：pytest tests/document_collection -> 266 passed；ruff F,E9 清零
+
+ core/document_collection/cli.py       | 14 +++++++++++---
+ core/document_collection/screening.py | 27 ++++++++++++++++++++++++++-
+ core/document_collection/service.py   | 35 ++++++++++++++++++++++++++---------
+ 3 files changed, 63 insertions(+), 13 deletions(-)
+
+commit 0fd3119edfcc2bd19542e432926323ea24897123
+Author: admin <admin@local>
+Date:   2026-09-09 20:53:17 +0800
+
+    fix(document_collection): 真实 Pilot 暴露的 4 个缺陷 + 分层抽样重写
+    
+    第一次真实采集（80 条样本）暴露的问题，全部已修复并补回归用例：
+    
+    1. lark-cli 失败时把错误 JSON 打到 stderr，成功时才打 stdout。
+       原实现只解析 stdout，导致结构化 error.code 丢失，
+       所有失败都被当成"未知永久错误"。现在 stdout / stderr 都解析。
+    
+    2. 在线文档导出返回 code=600 "hybrid resource expired" 被误判为永久错误。
+       实测同一份 docx 隔几秒重试即成功，说明是服务端资源缓存过期。
+       现在 code 600 归入可重试；1069902(no permission)、131005(not found)
+       仍然判为永久错误，不浪费重试。重试耗尽后如实标 pending_export。
+    
+    3. 分层抽样按完整层名排序轮转时，第一个维度（来源）成了最高位：
+       docQA.llm（ASCII）的所有层都排在 知识库_2026（中文）之前，
+       抽 80 条结果一条都没抽到第一个来源，直接违背计划里
+       「两个源各取 30 份」的要求。重写为两级策略：
+       - 组间（source_name）轮转均分名额，组内不足自动把缺口补给其他组；
+       - 组内（top_folder / extension）贪心覆盖，优先选"组合新"的条目，
+         其次选"维度取值新"的，稀有格式和稀有目录会在前几条就被抽到；
+       - 组间结果交错合并，避免 --sample 80 --limit 10 又退化成单来源。
+       种子用 sha256 派生（Python 内置 hash 每进程随机化，不可复现）。
+    
+    4. bitable 导出 csv 需要 --sub-id 指定子表，批量场景拿不到，
+       策略里统一改为导出 xlsx，并在策略中记录该实测结论。
+    
+    其他：
+    - 采集记录改存结构化错误（error_code / error_type / error_log_id），
+      报告里能一眼看出是权限问题还是服务端抖动，而不是整段 JSON。
+    - 抽取成功也写正向 reason_code（extract_ok + extractor=xxx），
+      满足验收检查点 4「每个决定都有 reason_codes」，此前成功项是空列表。
+    - 新增 tests/document_collection/test_acquisition.py（16 项）
+      与 test_regression_real_world.py（12 项），把上述真实踩坑固化成回归。
+    
+    验证：pytest tests/document_collection -> 266 passed；ruff F,E9 清零
+
+ config/collection_policy.json                      | 172 ++++++++++++--
+ core/document_collection/acquisition.py            | 213 ++++++++++++++++-
+ core/document_collection/adapters/lark_cli.py      |  34 ++-
+ core/document_collection/cli.py                    |   8 +
+ core/document_collection/service.py                |   7 +-
+ tests/document_collection/test_acquisition.py      | 263 +++++++++++++++++++++
+ tests/document_collection/test_inventory.py        |   4 +-
+ .../test_regression_real_world.py                  | 173 ++++++++++++++
+ 8 files changed, 841 insertions(+), 33 deletions(-)
+
+commit dd5a7a1a36a343b11b1ac35a1d7973fc4279298e
+Author: admin <admin@local>
+Date:   2026-09-09 20:31:21 +0800
+
+    docs+skill(document_collection): Task 0 基线范围 / Skill / 能力清单 / MCP+Plugin 预留
+    
+    Task 0 产出 docs/document_collection_scope.md：
+    - 仓库与分支基线、不动的既有模块清单及理由
+    - 运行环境实测版本（Python 3.12.6 / PyMuPDF 1.27.2.3 / lark-cli 1.0.85 等）
+    - 需求 revision 固定：采集计划 201、主需求 428、多格式需求 1140
+    - 从 revision 201 抄录的全部业务口径（语种配额、大小上限、题型题量表、去重口径）
+    - 7 条实测确认的接口事实，含 3 个踩坑：
+      * lark-cli.CMD 经 cmd.exe 会把 next_page_token 里的 "|" 当管道，
+        导致每个目录只拿到第 1 页（表现极具欺骗性），改为直接调 node + run.js
+      * files list / metas batch_query 都不返回文件大小，门槛改为下载后判定
+      * +download/+export 的 --output 必须是相对 cwd 的路径
+    - 授权 refresh token 2026-09-16 到期的运维提醒
+    - 真实盘点结果：知识库_2026 3818 + docQA.llm 1074 = 4892，跨源同 token 0；
+      类型分布与在线计划 1.2 节表格逐格一致（独立交叉验证）
+    
+    Skill 层：
+    - skills/document_collection/SKILL.md：触发条件、命令对照、固定执行顺序、
+      7 类必须停下的信号、7 条禁止动作、输出契约与产物清单、业务口径速查
+      （不含任何数据处理代码）
+    - capability-manifest.json：8 个能力的 inputs/outputs/side_effects/stop_conditions/
+      invariants，与 contracts.CAPABILITIES 逐字段交叉校验通过；
+      显式区分「注册表顺序」与 fixed_pipeline_order「执行顺序」
+    - examples/scenarios.md：Task 8 要求的 7 个场景，全部可复制执行
+    - CLI 新增 explain 只读诊断命令，替代场景 2 里原本要手写 Python 查库的做法
+    
+    Task 9 预留（不实现）：
+    - mcp_server/README.md：7 条边界规则 + 映射表 + 未来目录建议
+    - plugins/README.md：Plugin 只能调 CLI/MCP，附每平台单独验证清单
+    
+    测试：tests/document_collection/test_skill_scenarios.py 覆盖文档一致性与 7 个场景行为
+    验证：pytest tests/document_collection -> 241 passed；ruff F,E9 清零
+
+ core/document_collection/cli.py                    |  95 +++++
+ core/document_collection/contracts.py              |   1 +
+ core/document_collection/extraction.py             |  10 +
+ docs/document_collection_scope.md                  | 321 +++++++++++++++
+ mcp_server/README.md                               |  75 ++++
+ plugins/README.md                                  |  79 ++++
+ skills/document_collection/SKILL.md                | 164 ++++++++
+ .../document_collection/capability-manifest.json   | 449 +++++++++++++++++++++
+ skills/document_collection/examples/scenarios.md   | 182 +++++++++
+ tests/document_collection/test_skill_scenarios.py  | 313 ++++++++++++++
+ 10 files changed, 1689 insertions(+)
+
+commit 84133562560b5d970d5e626253d034f5d24b46f9
+Author: admin <admin@local>
+Date:   2026-09-09 20:17:20 +0800
+
+    test(document_collection): 补齐分层测试 225 通过 + 修复本地适配器 item_id 超长缺陷
+    
+    新增测试（tests/document_collection/）：
+    - test_contracts.py       契约稳定性、能力表 8 项一一对应
+    - test_config.py          策略校验，业务约束自相矛盾必须报错
+    - test_textstats.py       P0 六语种识别、非 P0 脚本不误判、指纹与规范化
+    - test_adapters.py        只读白名单、Windows .cmd 管道坑回归、录制/回放、脱敏
+    - test_inventory.py       分页/嵌套/空目录/缺 next_page_token/单页失败容错/幂等
+    - test_extraction.py      每种已支持格式一个夹具 + 定位信息 + 确定性
+    - test_screening.py       硬规则顺序、边界值、硬失败不可被 LLM 覆盖
+    - test_deduplication.py   精确/正文重复、近重复只标记、来源路径全保留
+    - test_query_generation.py 题量<12、题量不重复、六语种定位词黑名单
+    - test_cli.py             子进程真实调用、退出码、--json 契约、本地端到端
+    - fixtures/lark_drive_pages/ 15 个脱敏录制响应（含 429/5xx/超时/权限/导出失败）
+    
+    修复的真实缺陷：
+    1. local_files 适配器用绝对路径当 item_token，直接派生成文件名后超出
+       Windows MAX_PATH(260)，extract 阶段抛 FileNotFoundError。
+       新增 contracts.safe_item_id()：飞书 token 保持原样便于人工对照，
+       非安全字符的 token 归一成 id-<sha256前24位>；派生名上限收到 64 字符。
+    2. 去重代表版本选择只用「正文长度+字节数+路径字典序」，
+       导致 supplement 源可能压过 primary 源。现在按需求第五章口径写成
+       确定性顺序：正文更长 > 文件更大 > 有页数定位 > primary 优先 > 路径兜底，
+       并把规则原文写进 dedup_groups.csv 的「推荐原因」列。
+    3. 图形主导判定缺图形证据时会误杀：把「文字密度不足但没有图片证据」
+       拆成 is_text_too_sparse -> needs_review，只有图片证据充分才 reject。
+       同时删掉 screening 里被新分支覆盖的死代码。
+    4. run_id 校验放过 ".." / "."，会让工作区路径逃逸；已收紧。
+    
+    验证：
+    - pytest tests/document_collection -> 225 passed
+    - ruff check --select F,E9 -> All checks passed
+
+ core/document_collection/acquisition.py            |   3 +-
+ core/document_collection/adapters/lark_cli.py      |  40 ++-
+ core/document_collection/config.py                 |  10 +-
+ core/document_collection/contracts.py              |  18 ++
+ core/document_collection/deduplication.py          |  18 +-
+ core/document_collection/extraction.py             |   4 +-
+ core/document_collection/inventory.py              |  19 +-
+ core/document_collection/screening.py              |  21 +-
+ core/document_collection/service.py                |   5 +-
+ core/document_collection/state.py                  |  10 +-
+ core/document_collection/textstats.py              |  57 ++--
+ .../fixtures/lark_drive_pages/download_ok.json     |  16 +
+ .../lark_drive_pages/download_with_progress.json   |  16 +
+ .../fixtures/lark_drive_pages/empty_folder.json    |  16 +
+ .../fixtures/lark_drive_pages/error_429.json       |  18 ++
+ .../fixtures/lark_drive_pages/error_500.json       |  17 ++
+ .../lark_drive_pages/error_permission.json         |  17 ++
+ .../fixtures/lark_drive_pages/error_timeout.json   |  17 ++
+ .../fixtures/lark_drive_pages/export_failed.json   |  17 ++
+ .../lark_drive_pages/has_more_no_token.json        |  27 ++
+ .../fixtures/lark_drive_pages/inspect_folder.json  |  19 ++
+ .../fixtures/lark_drive_pages/metas_no_size.json   |  26 ++
+ .../fixtures/lark_drive_pages/nested_child.json    |  47 +++
+ .../fixtures/lark_drive_pages/page1_of_2.json      |  48 +++
+ .../fixtures/lark_drive_pages/page2_of_2.json      |  37 +++
+ .../lark_drive_pages/redaction_sample.json         |  15 +
+ .../lark_drive_pages/second_source_page.json       |  57 ++++
+ tests/document_collection/test_adapters.py         | 256 ++++++++++++++++
+ tests/document_collection/test_cli.py              | 231 +++++++++++++++
+ tests/document_collection/test_config.py           | 173 +++++++++++
+ tests/document_collection/test_contracts.py        | 109 +++++++
+ tests/document_collection/test_deduplication.py    | 217 ++++++++++++++
+ tests/document_collection/test_extraction.py       | 235 +++++++++++++++
+ tests/document_collection/test_inventory.py        | 312 ++++++++++++++++++++
+ tests/document_collection/test_query_generation.py | 328 +++++++++++++++++++++
+ tests/document_collection/test_screening.py        | 321 ++++++++++++++++++++
+ tests/document_collection/test_textstats.py        | 178 +++++++++++
+ 37 files changed, 2931 insertions(+), 44 deletions(-)
+
+commit 34de40ccf588d745e5ec6e656cbe5067a12bd84a
+Author: admin <admin@local>
+Date:   2026-09-09 19:44:44 +0800
+
+    fix(document_collection): 端到端流水线跑通 + 4 个真实缺陷修复
+    
+    修复（均由 tests/document_collection/test_pipeline_e2e.py 暴露）：
+    1. screening: 正文为空的图形主导 PDF 被误判成 needs_review。
+       原因是语言规则排在图形主导之前，空正文语言必然是 unknown，
+       真正的淘汰原因被 language_ambiguous 掩盖。现在先做图形主导判定。
+    2. screening: 采集阶段已硬拒绝的条目（超限文件，blob 已删）在筛选阶段
+       被软化成 needs_review(artifact_missing)，等于放软了硬门槛。
+       现在 hard_screen 接收 acquire 决定，硬失败原样沿用。
+    3. service.report: stage_summaries 自引用导致 json.dumps Circular reference。
+    4. screening: RC_EXTRACT_EMPTY 未导入（ruff F821），一跑就 NameError。
+    
+    测试夹具修复（不是产品缺陷，但会掩盖真实行为）：
+    - PyMuPDF base14 字体不含西里尔/汉字/阿拉伯文字形，改用 insert_htmlbox，
+      否则生成的 PDF 有字符但语言识别为 unknown。
+    - FakeLLM 的 query 模板补齐 6 个 P0 语种，并让同题型两条文案不同。
+    - 本机 TEMP 下 pytest-of-admin 权限被拒（WinError 5），改用仓库内 workdir 夹具。
+    
+    工程化：
+    - 引入 ruff（F,E9）静态检查，已清零。
+    - inventory 类型统计表补「两源合并去重后」列，CSV 与 MD 口径一致。
+    - 生成的真实格式夹具不入库（.gitignore）。
+    
+    验证：pytest tests/document_collection/test_pipeline_e2e.py -> 15 passed
+
+ .gitignore                                       |   4 +
+ core/document_collection/acquisition.py          |   4 +-
+ core/document_collection/adapters/base.py        |   2 +-
+ core/document_collection/adapters/local_files.py |   2 +-
+ core/document_collection/config.py               |   2 +-
+ core/document_collection/deduplication.py        |   3 +-
+ core/document_collection/extraction.py           |   4 +-
+ core/document_collection/extractors/pdf.py       |   2 +-
+ core/document_collection/extractors/text.py      |   2 +-
+ core/document_collection/inventory.py            |  19 +-
+ core/document_collection/screening.py            |  33 +-
+ core/document_collection/service.py              |   4 +-
+ core/document_collection/textstats.py            |   1 -
+ tests/document_collection/conftest.py            | 612 +++++++++++++++++++++++
+ tests/document_collection/test_pipeline_e2e.py   | 316 ++++++++++++
+ 15 files changed, 984 insertions(+), 26 deletions(-)
+
+commit 4ae960f179984c350e50ebf11d40c362166c5080
+Author: admin <admin@local>
+Date:   2026-09-09 19:27:01 +0800
+
+    feat(document_collection): CLI+Core+Skill 两周MVP核心实现（Task 0-8 代码）
+    
+    - 统一契约层 contracts.py：8 个能力名、5 个运行状态、条目状态与 reason code
+    - 策略驱动 config/collection_policy.json：大小/语种/题型题量/排除项/只读安全全部外置
+    - SQLite 状态层 state.py：runs/items/item_sources/artifacts/extractions/decisions/dedup_groups/queries/llm_calls
+    - 适配器：lark_cli（只读白名单+相对路径下载+重试+脱敏）、local_files、recorded（录制/回放）
+    - 盘点 inventory：递归分页、类型归一、跨源 token 合并去重计数、真实文件夹名报表
+    - 采集 acquisition：内容寻址 artifacts/<sha256[:2]>/、临时文件+原子改名、超限即拒
+    - 抽取 extraction + extractors：签名嗅探真实 MIME、pdf/docx/pptx/xlsx/csv/txt 定位信息
+    - 去重 deduplication：SHA-256 + 规范化正文指纹，近重复只标记
+    - 筛选 screening：硬规则 7 步顺序，硬失败不可被 LLM 覆盖
+    - Query query_generation：10 条(5/3/2/7/9)、整篇文档、定位词黑名单多语种校验
+    - 报告 reporting：覆盖/淘汰/配额缺口/成本
+    - CoreService + argparse CLI（退出码 0/1/2/3/4）
+    
+    实测确认的接口事实：
+    - lark-cli 1.0.85 drive files list / metas batch_query 均不返回文件大小
+    - drive +download --output 必须是相对当前工作目录的路径
+    - drive +export 返回 saved_path/size_bytes/content_type
+
+ .gitignore                                       |  12 +-
+ config/collection_policy.json                    | 199 ++++++++
+ core/document_collection/__init__.py             |  59 +++
+ core/document_collection/acquisition.py          | 400 ++++++++++++++++
+ core/document_collection/adapters/__init__.py    |   1 +
+ core/document_collection/adapters/base.py        | 107 +++++
+ core/document_collection/adapters/lark_cli.py    | 327 +++++++++++++
+ core/document_collection/adapters/local_files.py | 121 +++++
+ core/document_collection/adapters/recorded.py    | 135 ++++++
+ core/document_collection/cli.py                  | 386 ++++++++++++++++
+ core/document_collection/config.py               | 379 +++++++++++++++
+ core/document_collection/contracts.py            | 316 +++++++++++++
+ core/document_collection/deduplication.py        | 281 ++++++++++++
+ core/document_collection/extraction.py           | 369 +++++++++++++++
+ core/document_collection/extractors/__init__.py  |  69 +++
+ core/document_collection/extractors/base.py      | 118 +++++
+ core/document_collection/extractors/docx.py      | 137 ++++++
+ core/document_collection/extractors/pdf.py       | 126 +++++
+ core/document_collection/extractors/pptx.py      | 121 +++++
+ core/document_collection/extractors/text.py      | 103 +++++
+ core/document_collection/extractors/xlsx.py      | 187 ++++++++
+ core/document_collection/inventory.py            | 561 +++++++++++++++++++++++
+ core/document_collection/llm.py                  | 359 +++++++++++++++
+ core/document_collection/query_generation.py     | 484 +++++++++++++++++++
+ core/document_collection/reporting.py            | 378 +++++++++++++++
+ core/document_collection/screening.py            | 423 +++++++++++++++++
+ core/document_collection/service.py              | 425 +++++++++++++++++
+ core/document_collection/state.py                | 549 ++++++++++++++++++++++
+ core/document_collection/textstats.py            | 310 +++++++++++++
+ scripts/collection_cli.py                        |  26 ++
+ 30 files changed, 7466 insertions(+), 2 deletions(-)
