@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# 运行产物：体积大且可复跑重生成（关键结论已镜像到 docs/结果与验证/）
+output/
+
+# 密钥与本地配置：本地保留，绝不入库
+config/llm_config.json
+.env
+
+# 日志
+*.log
+
+# 临时工作区 / 一次性脚本 / 模型原始出入参（不入库）
+tmp/
+
+# 测试夹具里的真实格式文档：由 conftest 会话级现场生成，不入库
+tests/document_collection/fixtures/documents/
+
+# 索引 / IDE / OS
+.codegraph/
+.vscode/
+.idea/
+.claude/
+Thumbs.db
+.DS_Store
+*.tmp
+*.bak
+*.orig
+
+# skill 安装副本的本机路径配置（模板 runtime.example.json 入库，真实路径不入库）
+skills/**/runtime.json
