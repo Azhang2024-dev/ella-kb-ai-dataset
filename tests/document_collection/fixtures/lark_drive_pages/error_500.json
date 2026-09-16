@@ -1,0 +1,17 @@
+{
+  "ok": false,
+  "identity": "user",
+  "error": {
+    "type": "server_error",
+    "subtype": "internal",
+    "message": "HTTP 503 Service Unavailable"
+  },
+  "_notice": {
+    "update": {
+      "command": "lark-cli update",
+      "current": "1.0.85",
+      "latest": "1.0.85",
+      "message": "fixture"
+    }
+  }
+}
