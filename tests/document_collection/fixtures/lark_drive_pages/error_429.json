@@ -1,0 +1,18 @@
+{
+  "ok": false,
+  "identity": "user",
+  "error": {
+    "type": "rate_limit",
+    "subtype": "too_many_requests",
+    "message": "HTTP 429 Too Many Requests: please retry later",
+    "hint": "backoff"
+  },
+  "_notice": {
+    "update": {
+      "command": "lark-cli update",
+      "current": "1.0.85",
+      "latest": "1.0.85",
+      "message": "fixture"
+    }
+  }
+}
