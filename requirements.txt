@@ -1,0 +1,16 @@
+# Ella 知识库 AI 生题评测集 —— 文档采集/筛选/生题流水线依赖
+# 版本与 2026-09-09 实测通过的环境一致（Python 3.12.6）
+
+# --- 运行时：内容抽取 ---
+PyMuPDF==1.27.2.3        # extractors/pdf.py 用 import fitz
+python-docx==1.2.0       # extractors/docx.py
+python-pptx==1.0.2       # extractors/pptx.py
+openpyxl==3.1.5          # extractors/xlsx.py
+
+# --- 运行时（可选）：语义复核 / Query 生成 ---
+# 未安装或未配置 api_key 时，llm.py 会显式降级为 OfflineLLMAdapter，不会伪装成功
+litellm==1.89.4
+
+# --- 开发与验收 ---
+pytest==9.1.1
+ruff==0.16.6
