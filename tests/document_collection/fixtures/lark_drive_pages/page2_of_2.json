@@ -1,0 +1,37 @@
+{
+  "ok": true,
+  "identity": "user",
+  "data": {
+    "files": [
+      {
+        "created_time": "1700000000",
+        "modified_time": "1700000001",
+        "name": "cours_03.pdf",
+        "owner_id": "ou_fixtureowner",
+        "parent_token": "ROOT",
+        "token": "TOK_A3",
+        "type": "file",
+        "url": "https://example.feishu.cn/file/TOK_A3"
+      },
+      {
+        "created_time": "1700000000",
+        "modified_time": "1700000001",
+        "name": "polycope",
+        "owner_id": "ou_fixtureowner",
+        "parent_token": "ROOT",
+        "token": "TOK_ONLINE",
+        "type": "docx",
+        "url": "https://example.feishu.cn/file/TOK_ONLINE"
+      }
+    ],
+    "has_more": false
+  },
+  "_notice": {
+    "update": {
+      "command": "lark-cli update",
+      "current": "1.0.85",
+      "latest": "1.0.85",
+      "message": "fixture"
+    }
+  }
+}
