@@ -1,0 +1,16 @@
+{
+  "ok": true,
+  "identity": "user",
+  "data": {
+    "saved_path": "RELATIVE/artifacts/y.pdf",
+    "size_bytes": 4096
+  },
+  "_notice": {
+    "update": {
+      "command": "lark-cli update",
+      "current": "1.0.85",
+      "latest": "1.0.85",
+      "message": "fixture"
+    }
+  }
+}
