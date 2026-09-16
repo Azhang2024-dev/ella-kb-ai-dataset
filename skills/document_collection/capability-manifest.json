@@ -1,0 +1,632 @@
+{
+  "name": "document_collection",
+  "version": "0.1",
+  "contract_version": "0.1",
+  "display_name": "知识库文档采集与筛选",
+  "description": "只读采集飞书云盘文档，抽取正文，按业务硬规则筛选、跨源去重，并为合格文档生成 10 条整篇文档级 query。所有能力都返回统一 RunResult，可断点续跑。",
+  "owner_scope": "Ella 知识库 AI 生题评测集",
+  "entrypoints": {
+    "cli": "scripts/collection_cli.py",
+    "cli_module": "core.document_collection.cli:main",
+    "python": "core.document_collection.CoreService",
+    "python_factory": "core.document_collection.build_service"
+  },
+  "policy_file": "config/collection_policy.json",
+  "runtime": {
+    "python": ">=3.12",
+    "interpreter": ".venv/Scripts/python.exe",
+    "external_cli": "lark-cli (>=1.0.85)",
+    "optional_python_packages": [
+      "pymupdf",
+      "python-docx",
+      "python-pptx",
+      "openpyxl",
+      "litellm"
+    ]
+  },
+  "run_statuses": [
+    "completed",
+    "partial",
+    "needs_review",
+    "failed",
+    "cancelled"
+  ],
+  "item_statuses": [
+    "accepted",
+    "rejected",
+    "needs_review",
+    "pending_export",
+    "conversion_required"
+  ],
+  "pipeline_stages_internal": [
+    "discovered",
+    "acquired",
+    "acquire_failed",
+    "extracted",
+    "extraction_failed"
+  ],
+  "result_envelope": [
+    "status",
+    "run_id",
+    "summary",
+    "artifacts",
+    "review_items",
+    "errors",
+    "next_action"
+  ],
+  "exit_codes": {
+    "0": "completed",
+    "1": "failed（audit 有任何一条检查点不通过也返回 1）",
+    "2": "partial",
+    "3": "needs_review",
+    "4": "config_error"
+  },
+  "fixed_pipeline_order": [
+    "collection.inventory",
+    "collection.acquire",
+    "collection.extract",
+    "collection.deduplicate",
+    "collection.screen",
+    "collection.generate_queries",
+    "collection.generate_questions",
+    "collection.deliver",
+    "collection.report"
+  ],
+  "capabilities": [
+    {
+      "name": "collection.inventory",
+      "version": "0.1",
+      "cli_command": "inventory",
+      "future_mcp_tool": "collection_inventory",
+      "summary": "递归盘点已授权云盘文件夹，只列举不下载正文，两个来源合并后按 token 统一去重计数。",
+      "side_effects": [
+        "read_source",
+        "write_local"
+      ],
+      "requires_llm": false,
+      "may_need_human_review": false,
+      "retryable": true,
+      "idempotent": true,
+      "inputs": {
+        "page_size": "int, 默认取策略 source_access.page_size=200",
+        "max_depth": "int, 默认取策略 source_access.max_depth=10",
+        "per_source_limit": "int|null, 每个源最多盘点多少条（小批量试跑用）",
+        "max_folders": "int|null, 最多下探多少个子文件夹",
+        "source": "string[], 只盘点指定源文件夹名",
+        "include_subfolder": "string[], 只盘点这些一级子目录",
+        "exclude_subfolder": "string[], 跳过这些一级子目录"
+      },
+      "outputs": {
+        "artifacts": [
+          "run_manifest.json",
+          "source_inventory_raw.jsonl",
+          "source_inventory.jsonl",
+          "source_type_counts.csv",
+          "inventory_summary.md"
+        ],
+        "summary_keys": [
+          "sources",
+          "raw_occurrences",
+          "unique_items",
+          "duplicate_occurrences",
+          "cross_source_duplicate_tokens",
+          "type_counts",
+          "error_count"
+        ]
+      },
+      "stop_conditions": [
+        "任一源文件夹列举失败且重试后仍失败 -> status=partial，看 errors 再决定",
+        "出现 has_more=true 但缺 next_page_token -> 视为可能漏项，必须记录并复核"
+      ],
+      "next_action": "collection.acquire"
+    },
+    {
+      "name": "collection.acquire",
+      "version": "0.1",
+      "cli_command": "acquire",
+      "future_mcp_tool": "collection_acquire",
+      "summary": "只读下载普通文件、导出在线资源；临时文件 + 原子改名 + SHA-256 内容寻址存储；超限文件直接拒绝并删除本地副本。",
+      "side_effects": [
+        "read_source",
+        "write_local",
+        "retryable"
+      ],
+      "requires_llm": false,
+      "may_need_human_review": true,
+      "retryable": true,
+      "idempotent": true,
+      "inputs": {
+        "limit": "int|null",
+        "extension": "string[], 只采集这些扩展名",
+        "item_type": "string[], local_file|online_doc|online_sheet|online_slides|shortcut|unknown",
+        "source": "string[]",
+        "status": "string[], 只处理这些条目状态（续跑用，默认 discovered/acquire_failed/pending_export）",
+        "dry_run": "bool, 只判断能不能采，不真正下载",
+        "keep_oversized": "bool, 默认 false：超限文件的本地副本会被删除"
+      },
+      "outputs": {
+        "artifacts": [
+          "acquisition_report.jsonl",
+          "artifacts/<sha256[:2]>/<sha256>.<ext>",
+          "artifacts_meta/<item_id>.json"
+        ],
+        "summary_keys": [
+          "total_selected",
+          "status_counts",
+          "bytes_acquired",
+          "elapsed_sec"
+        ]
+      },
+      "stop_conditions": [
+        "status_counts 里 acquire_failed 占比明显偏高 -> 先查授权是否过期，不要盲目重跑",
+        "出现 pending_export -> 在线资源导出受限，转人工确认导出格式后重试"
+      ],
+      "next_action": "collection.extract"
+    },
+    {
+      "name": "collection.extract",
+      "version": "0.1",
+      "cli_command": "extract",
+      "future_mcp_tool": "collection_extract",
+      "summary": "按文件签名识别真实 MIME 并与扩展名交叉校验，抽取正文并保留页码/段落/幻灯片/Sheet/行号定位。",
+      "side_effects": [
+        "write_local"
+      ],
+      "requires_llm": false,
+      "may_need_human_review": true,
+      "retryable": true,
+      "idempotent": true,
+      "inputs": {
+        "limit": "int|null",
+        "extension": "string[]",
+        "status": "string[], 默认 acquired/extraction_failed",
+        "no_text_dump": "bool, 不把正文落盘"
+      },
+      "outputs": {
+        "artifacts": [
+          "extraction_report.jsonl",
+          "extracted/<item_id>.txt",
+          "segments/<item_id>.jsonl"
+        ],
+        "summary_keys": [
+          "total_selected",
+          "status_counts",
+          "language_counts",
+          "total_chars",
+          "long_documents"
+        ]
+      },
+      "supported_formats": {
+        "priority_1": [
+          "pdf",
+          "txt",
+          "md",
+          "docx"
+        ],
+        "priority_2": [
+          "pptx",
+          "xlsx",
+          "csv"
+        ],
+        "conversion_required": [
+          "doc",
+          "ppt",
+          "xls"
+        ]
+      },
+      "stop_conditions": [
+        "mime_extension_mismatch -> 不猜，转人工复核",
+        "conversion_required -> 本期没有批准转换器，不要尝试自行转换"
+      ],
+      "next_action": "collection.deduplicate"
+    },
+    {
+      "name": "collection.screen",
+      "version": "0.1",
+      "cli_command": "screen",
+      "future_mcp_tool": "collection_screen",
+      "summary": "先跑确定性硬规则（采集成功→格式支持→大小合格→抽取成功→语言符合→非图形主导→非精确重复），再对通过项做可选语义复核。",
+      "side_effects": [
+        "write_local",
+        "needs_human_review"
+      ],
+      "requires_llm": false,
+      "optional_llm": true,
+      "may_need_human_review": true,
+      "retryable": true,
+      "idempotent": true,
+      "inputs": {
+        "limit": "int|null",
+        "semantic": "bool, --semantic 强制启用 / --no-semantic 强制关闭，默认跟随策略 llm.enabled",
+        "status": "string[]"
+      },
+      "outputs": {
+        "artifacts": [
+          "screening_report.jsonl",
+          "accepted_documents.csv",
+          "rejected_documents.csv",
+          "human_review_queue.csv"
+        ],
+        "summary_keys": [
+          "total_screened",
+          "status_counts",
+          "reason_counts",
+          "accepted_by_language",
+          "accepted_by_subject",
+          "semantic_review_enabled"
+        ]
+      },
+      "invariants": [
+        "硬失败（大小超限、格式不支持、图形主导、精确重复）不能被语义复核覆盖",
+        "没有 evidence 的模型判断不能自动 accepted",
+        "超过 5 万字不淘汰，只标记 requires_full_text_review"
+      ],
+      "stop_conditions": [
+        "needs_review 数量很大 -> 先人工看 human_review_queue.csv 的前 20 条再决定是否调策略",
+        "模型不可用 -> 语义项全部转 needs_review，不允许自动放行"
+      ],
+      "next_action": "collection.generate_queries 或 collection.report"
+    },
+    {
+      "name": "collection.deduplicate",
+      "version": "0.1",
+      "cli_command": "deduplicate",
+      "future_mcp_tool": "collection_deduplicate",
+      "summary": "跨两个来源统一去重：先 SHA-256，再规范化正文指纹；近重复只标记不淘汰；保留全部来源路径。",
+      "side_effects": [
+        "write_local"
+      ],
+      "requires_llm": false,
+      "may_need_human_review": false,
+      "retryable": true,
+      "idempotent": true,
+      "inputs": {
+        "limit": "int|null",
+        "tolerance": "float, 近重复字符数容差，默认 0.02",
+        "keep_duplicates": "bool, 只标记不淘汰"
+      },
+      "outputs": {
+        "artifacts": [
+          "dedup_report.jsonl",
+          "dedup_groups.csv",
+          "near_duplicate_suspects.jsonl"
+        ],
+        "summary_keys": [
+          "total_rows",
+          "sha256_groups",
+          "normalized_groups",
+          "duplicate_items",
+          "unique_items",
+          "near_duplicate_pairs"
+        ]
+      },
+      "representative_rule": "正文更长 > 文件更大 > 有页数定位 > 来源角色 primary 优先 > 路径字典序兜底",
+      "stop_conditions": [
+        "near_duplicate_pairs 很多时，先人工抽查再决定是否收紧容差"
+      ],
+      "next_action": "collection.screen"
+    },
+    {
+      "name": "collection.generate_queries",
+      "version": "0.1",
+      "cli_command": "query",
+      "future_mcp_tool": "collection_generate_queries",
+      "summary": "为 accepted 文档生成 10 条整篇文档级 query（选择题2/填空题2/解答题2/判断题2/混合2，题量 5/3/2/7/9），并做数量、题量、定位词、语言、重复、证据六项校验。",
+      "side_effects": [
+        "write_local",
+        "call_llm",
+        "needs_human_review"
+      ],
+      "requires_llm": true,
+      "may_need_human_review": true,
+      "retryable": true,
+      "idempotent": false,
+      "inputs": {
+        "limit": "int|null, 先跑 10-20 份再扩量",
+        "status": "string[], 默认 accepted"
+      },
+      "outputs": {
+        "artifacts": [
+          "query_records.jsonl",
+          "query_evidence.jsonl",
+          "query_validation_report.md"
+        ],
+        "summary_keys": [
+          "total_documents",
+          "status_counts",
+          "error_codes",
+          "total_queries",
+          "validated_documents"
+        ]
+      },
+      "invariants": [
+        "query 文案不得出现片段/章节/页码/Sheet/表格等定位词（六语种黑名单）",
+        "每条 query 题量必须 < 12，同文档内不同题型题量尽量不重复",
+        "query 语言必须跟随文档语言",
+        "evidence_locator 只写进内部台账，不写进 query 文案"
+      ],
+      "stop_conditions": [
+        "模型不可用 -> 直接返回 needs_review，不产出任何伪造 query",
+        "validated 比例为 0 -> 先看 query_validation_report.md 的失败原因分布"
+      ],
+      "next_action": "collection.generate_questions"
+    },
+    {
+      "name": "collection.generate_questions",
+      "version": "0.1",
+      "cli_command": "questions",
+      "future_mcp_tool": "collection_generate_questions",
+      "summary": "为上一阶段已 validated 的 query 文档生成参考题目（题干/选项/答案/解析）。输入窗口与 query 同源（content_rules.prompt_text_chars）；解析后做键名归一化；产物 questions/<item_id>.json + question_records.jsonl + question_summary.json，并同时 upsert 状态库 questions 表。",
+      "side_effects": [
+        "write_local",
+        "call_llm",
+        "needs_human_review"
+      ],
+      "requires_llm": true,
+      "may_need_human_review": true,
+      "retryable": true,
+      "idempotent": false,
+      "inputs": {
+        "limit": "int|null, 先跑 3-5 份再扩量",
+        "item_id": "string[], 定向批次；或 --item-id-file 白名单"
+      },
+      "outputs": {
+        "artifacts": [
+          "questions/<item_id>.json",
+          "question_records.jsonl",
+          "question_summary.json"
+        ],
+        "summary_keys": [
+          "total_documents",
+          "status_counts",
+          "error_codes",
+          "total_questions",
+          "documents_with_questions"
+        ]
+      },
+      "invariants": [
+        "题目语言与文档正文语言一致",
+        "答案必须能在原文找到依据，不得编造",
+        "JSON 键名用英文原样（stem/options/answer/explanation），漂移键会被归一化",
+        "jsonl 与状态库 questions 表同写，不得只写一侧"
+      ],
+      "stop_conditions": [
+        "模型不可用 -> 直接返回 needs_review，不产出任何伪造题目",
+        "no_text_for_question_generation / question_structure_incomplete 非空 -> 先看 question_summary.json"
+      ],
+      "next_action": "collection.report"
+    },
+    {
+      "name": "collection.report",
+      "version": "0.1",
+      "cli_command": "report",
+      "future_mcp_tool": "collection_report",
+      "summary": "从 SQLite 现算覆盖与淘汰报告：每个源文件夹的类型数量表、合并去重结果、淘汰原因分布、P0 语种与 P1 学科配额缺口、格式软目标差额、成本与耗时。",
+      "side_effects": [
+        "write_local"
+      ],
+      "requires_llm": false,
+      "may_need_human_review": false,
+      "retryable": true,
+      "idempotent": true,
+      "inputs": {},
+      "outputs": {
+        "artifacts": [
+          "coverage_report.md",
+          "cost_and_runtime.json",
+          "all_decisions.csv"
+        ],
+        "summary_keys": [
+          "facts",
+          "quota_gap",
+          "status_counts",
+          "accepted_total",
+          "language_quota_met",
+          "subject_quota_met",
+          "stage_summaries"
+        ]
+      },
+      "stop_conditions": [],
+      "next_action": null
+    },
+    {
+      "name": "collection.resume",
+      "version": "0.1",
+      "cli_command": "resume",
+      "future_mcp_tool": "collection_resume",
+      "summary": "读取当前 run 的进度并给出下一步应该调用哪个能力；不修改任何数据。",
+      "side_effects": [
+        "write_local"
+      ],
+      "requires_llm": false,
+      "may_need_human_review": false,
+      "retryable": true,
+      "idempotent": true,
+      "inputs": {},
+      "outputs": {
+        "artifacts": [
+          "result_resume.json"
+        ],
+        "summary_keys": [
+          "item_status_counts",
+          "artifact_status_counts",
+          "extraction_status_counts",
+          "screen_status_counts",
+          "queries_total",
+          "llm_stats",
+          "stage_summaries"
+        ]
+      },
+      "stop_conditions": [],
+      "next_action": "由 summary 里的 next_action 字段给出"
+    },
+    {
+      "name": "collection.ingest",
+      "version": "0.1",
+      "cli_command": "ingest",
+      "future_mcp_tool": "collection_ingest",
+      "summary": "本地优先入口：递归登记用户已下载好的文档（不访问云盘），等价于 inventory+acquire 的本地版本，产出 acquired 条目供 extract 及之后阶段使用。",
+      "side_effects": [
+        "read_source",
+        "write_local"
+      ],
+      "requires_llm": false,
+      "may_need_human_review": true,
+      "retryable": true,
+      "idempotent": true,
+      "inputs": {
+        "dir": "string, 必填。本地文件夹路径（递归遍历其中的文档）",
+        "source_name": "string|null, 来源名（默认取文件夹名）",
+        "extension": "string[], 只导入这些扩展名",
+        "limit": "int|null, 最多导入多少个文件",
+        "copy": "bool, 是否复制到内容寻址 artifacts/（默认 false=原地引用，不复制不动源文件）",
+        "no_recursive": "flag, 只导入第一层",
+        "include_hidden": "flag, 包含隐藏文件/Office 临时文件（默认跳过）"
+      },
+      "outputs": {
+        "artifacts": [
+          "ingest_report.jsonl"
+        ],
+        "summary_keys": [
+          "root",
+          "source_name",
+          "total_files",
+          "status_counts",
+          "type_counts",
+          "bytes_total",
+          "copy_mode",
+          "error_count"
+        ]
+      },
+      "stop_conditions": [
+        "出现 needs_review / ingest_failed -> 看 ingest_report.jsonl 的 reason_codes",
+        "文件数为 0 -> 检查 --dir 路径与 --extension 过滤"
+      ],
+      "next_action": "collection.extract"
+    },
+    {
+      "name": "collection.deliver",
+      "version": "0.1",
+      "cli_command": "deliver",
+      "future_mcp_tool": "collection_deliver",
+      "summary": "交付：从 accepted 池按语种/学科选目标集（语种以正文判定、学科以模型判定且须属 P0∪P1），按真实文件名硬链接落地，并产出 sheet4 格式交付表（一行一条 query）。",
+      "side_effects": [
+        "write_local"
+      ],
+      "requires_llm": false,
+      "may_need_human_review": true,
+      "retryable": true,
+      "idempotent": true,
+      "inputs": {
+        "per_language": "int, 每语种入选份数（默认 30；<=0 表示不设上限）",
+        "language": "string[], 只处理这些语种（默认取策略 P0 语种）",
+        "item_id": "string[], 定向白名单（空=全 accepted 池）",
+        "allow_out_of_scope_subject": "flag, 关闭学科二次校验（默认只交付学科属 P0∪P1 的文档）"
+      },
+      "outputs": {
+        "artifacts": [
+          "selected.csv",
+          "交付表_Query.xlsx",
+          "delivery_files/<语种>/<真实文件名>"
+        ],
+        "summary_keys": [
+          "selected_total",
+          "by_language",
+          "by_subject",
+          "dropped",
+          "queries_total",
+          "hardlinked",
+          "copied",
+          "missing_files"
+        ]
+      },
+      "stop_conditions": [
+        "selected_total=0 -> 检查 screen 是否已跑、学科门禁是否过严（dropped 里看原因）",
+        "missing_files>0 -> 有条目的 artifact 缺失，回查 acquire/extract"
+      ],
+      "next_action": "collection.report"
+    }
+  ],
+  "capabilities_order_note": "capabilities 数组是按能力注册表顺序排列（与 core/document_collection/contracts.py 的 CAPABILITIES 一一对应），不是执行顺序；真实执行顺序见 fixed_pipeline_order。screen 依赖 deduplicate 的结果（精确重复要在硬筛选里淘汰），所以执行时 deduplicate 在 screen 之前。",
+  "safety": {
+    "source_readonly": true,
+    "forbidden_side_effects": [
+      "modify_source",
+      "delete_source",
+      "move_source",
+      "rename_source",
+      "upload_to_source"
+    ],
+    "allowlisted_lark_commands": [
+      "drive files list",
+      "drive metas batch_query",
+      "drive +inspect",
+      "drive +download",
+      "drive +export"
+    ],
+    "enforcement": "core/document_collection/adapters/lark_cli.py 的 _assert_allowed()：白名单外的子命令直接抛 SafetyViolation，不依赖调用方自觉",
+    "never_log": [
+      "access_token",
+      "tenant_access_token",
+      "user_access_token",
+      "app_secret",
+      "llm_api_key",
+      "mineru_token"
+    ]
+  },
+  "future_integration": {
+    "mcp": "把 capabilities[].future_mcp_tool 映射成 MCP tools，参数与 inputs 一一对应；MCP 只做协议适配，不复制任何筛选规则",
+    "plugin": "只允许包装 CLI 或未来的 MCP，不得复制 Core",
+    "agent_loop": "读 RunResult.next_action 与 status 即可编排；needs_review 必须停下等人"
+  },
+  "diagnostics": [
+    {
+      "cli_command": "explain",
+      "kind": "read_only_diagnostic",
+      "part_of_contract_capabilities": false,
+      "summary": "打印一个条目的完整判定链：来源、链接、产物、抽取指标、每阶段 status+reason_codes+evidence、query、去重分组",
+      "side_effects": [],
+      "requires_llm": false
+    },
+    {
+      "cli_command": "status",
+      "kind": "read_only_diagnostic",
+      "part_of_contract_capabilities": false,
+      "summary": "阶段×状态矩阵：items/artifacts/extractions/screen 各状态计数、query 校验数、去重分组数、语言分布、llm 统计与 next_action；人读表格优先，--json 输出 RunResult",
+      "side_effects": [
+        "write_local"
+      ],
+      "write_local_note": "与 audit 同口径：RunResult 统一落盘（result_*.json 与 runs.stage_state_json），不触碰 items/decisions 等业务表",
+      "requires_llm": false
+    },
+    {
+      "cli_command": "audit",
+      "kind": "read_only_diagnostic",
+      "part_of_contract_capabilities": false,
+      "summary": "机械化执行 5 个验收检查点，输出 PASS/FAIL；--compare-with 用于验证可复跑",
+      "side_effects": [
+        "write_local"
+      ],
+      "requires_llm": false,
+      "checkpoints": [
+        "1-能运行",
+        "2-盘点完整",
+        "3-没有误放行",
+        "4-结果可解释",
+        "5-可以复跑"
+      ],
+      "known_limitation": "在线资源导出产物（acquire_mode=export）不具备字节级可复现性：drive +export 每次由服务端重新渲染，实测同一文档两次导出字节数差几个 byte。audit 对这类产物只披露差异不判失败；下载类产物（acquire_mode=download）必须逐字节一致，实测 60/60 一致。"
+    }
+  ],
+  "local_pipeline_order": [
+    "collection.ingest",
+    "collection.extract",
+    "collection.deduplicate",
+    "collection.screen",
+    "collection.generate_queries",
+    "collection.generate_questions",
+    "collection.deliver",
+    "collection.report"
+  ],
+  "entry_chains_note": "两条入口共享 extract 之后的所有阶段：云盘链路 = inventory -> acquire -> …；本地链路 = ingest -> …。fixed_pipeline_order 记录云盘链路的内部阶段顺序。"
+}
