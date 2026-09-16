@@ -1,0 +1,48 @@
+{
+  "ok": true,
+  "identity": "user",
+  "data": {
+    "files": [
+      {
+        "created_time": "1700000000",
+        "modified_time": "1700000001",
+        "name": "cours_01.pdf",
+        "owner_id": "ou_fixtureowner",
+        "parent_token": "ROOT",
+        "token": "TOK_A1",
+        "type": "file",
+        "url": "https://example.feishu.cn/file/TOK_A1"
+      },
+      {
+        "created_time": "1700000000",
+        "modified_time": "1700000001",
+        "name": "cours_02.pdf",
+        "owner_id": "ou_fixtureowner",
+        "parent_token": "ROOT",
+        "token": "TOK_A2",
+        "type": "file",
+        "url": "https://example.feishu.cn/file/TOK_A2"
+      },
+      {
+        "created_time": "1700000000",
+        "modified_time": "1700000001",
+        "name": "sous-dossier",
+        "owner_id": "ou_fixtureowner",
+        "parent_token": "ROOT",
+        "token": "TOK_SUB",
+        "type": "folder",
+        "url": "https://example.feishu.cn/file/TOK_SUB"
+      }
+    ],
+    "has_more": true,
+    "next_page_token": "v3|wpjCj2XDkR48CwPCjUQiwpBiMcKCw5nCiRAHwoPCq2VMwpXDi8K_wrvCnsO5U8K"
+  },
+  "_notice": {
+    "update": {
+      "command": "lark-cli update",
+      "current": "1.0.85",
+      "latest": "1.0.85",
+      "message": "fixture"
+    }
+  }
+}
