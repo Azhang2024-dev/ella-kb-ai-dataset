@@ -1,0 +1,135 @@
+{
+  "run_id": "pilot-20260909-v5",
+  "generated_at": "2026-09-10T14:20:15",
+  "passed": true,
+  "total_checks": 14,
+  "failed_checks": 0,
+  "checks": [
+    {
+      "checkpoint": "1-能运行",
+      "name": "capability manifest 与契约一致",
+      "passed": true,
+      "detail": "manifest 8 个能力与契约逐项一致，SKILL.md 齐备",
+      "evidence": {}
+    },
+    {
+      "checkpoint": "1-能运行",
+      "name": "适配器协议不含任何写方法",
+      "passed": true,
+      "detail": "协议方法：['download_file', 'export_online', 'inspect', 'list_folder']",
+      "evidence": {
+        "methods": [
+          "download_file",
+          "export_online",
+          "inspect",
+          "list_folder"
+        ]
+      }
+    },
+    {
+      "checkpoint": "2-盘点完整",
+      "name": "没有 has_more=true 却缺 next_page_token 的漏项风险",
+      "passed": true,
+      "detail": "漏项风险 0 处",
+      "evidence": {
+        "count": 0,
+        "samples": []
+      }
+    },
+    {
+      "checkpoint": "2-盘点完整",
+      "name": "两个源文件夹都已盘点且用真实名称记录",
+      "passed": true,
+      "detail": "期望 ['docQA.llm', '知识库_2026']，实际 ['docQA.llm', '知识库_2026']",
+      "evidence": {}
+    },
+    {
+      "checkpoint": "2-盘点完整",
+      "name": "每条记录都有源文件夹名称",
+      "passed": true,
+      "detail": "缺失 0 条",
+      "evidence": {
+        "samples": []
+      }
+    },
+    {
+      "checkpoint": "3-没有误放行",
+      "name": "没有超大小文件被接受",
+      "passed": true,
+      "detail": "违规 0 条",
+      "evidence": {
+        "violations": []
+      }
+    },
+    {
+      "checkpoint": "3-没有误放行",
+      "name": "没有不支持格式被接受",
+      "passed": true,
+      "detail": "违规 0 条",
+      "evidence": {
+        "violations": []
+      }
+    },
+    {
+      "checkpoint": "3-没有误放行",
+      "name": "采集阶段的硬拒绝没有被筛选阶段翻案",
+      "passed": true,
+      "detail": "违规 0 条",
+      "evidence": {
+        "violations": []
+      }
+    },
+    {
+      "checkpoint": "3-没有误放行",
+      "name": "同一去重组里没有多条被接受",
+      "passed": true,
+      "detail": "违规 0 组",
+      "evidence": {
+        "violations": []
+      }
+    },
+    {
+      "checkpoint": "3-没有误放行",
+      "name": "被接受的文档没有相同 SHA-256",
+      "passed": true,
+      "detail": "重复 0 条",
+      "evidence": {
+        "accepted": 6,
+        "unique": 6
+      }
+    },
+    {
+      "checkpoint": "3-没有误放行",
+      "name": "云盘只读得到结构性保证（策略声明 + 只读白名单 + 协议无写方法）",
+      "passed": true,
+      "detail": "白名单：['drive files list', 'drive metas batch_query', 'drive +inspect', 'drive +download', 'drive +export']",
+      "evidence": {}
+    },
+    {
+      "checkpoint": "4-结果可解释",
+      "name": "每条筛选结论都有 status / reason_codes / source_path / artifact_path",
+      "passed": true,
+      "detail": "不合格 0 条",
+      "evidence": {
+        "samples": [],
+        "screened": 80
+      }
+    },
+    {
+      "checkpoint": "4-结果可解释",
+      "name": "每条淘汰都能给出单一决定原因",
+      "passed": true,
+      "detail": "缺失 0 条",
+      "evidence": {
+        "samples": []
+      }
+    },
+    {
+      "checkpoint": "5-可以复跑",
+      "name": "与另一次运行对比（未提供 --compare-with，跳过）",
+      "passed": true,
+      "detail": "离线一致性由 pytest test_pipeline_is_replayable_with_identical_decisions 覆盖",
+      "evidence": {}
+    }
+  ]
+}
