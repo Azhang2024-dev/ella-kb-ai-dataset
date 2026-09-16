@@ -1,0 +1,57 @@
+{
+  "ok": true,
+  "identity": "user",
+  "data": {
+    "files": [
+      {
+        "created_time": "1700000000",
+        "modified_time": "1700000001",
+        "name": "cours_01_copie.pdf",
+        "owner_id": "ou_fixtureowner",
+        "parent_token": "FOLDER_TWO",
+        "token": "TOK_A1",
+        "type": "file",
+        "url": "https://example.feishu.cn/file/TOK_A1"
+      },
+      {
+        "created_time": "1700000000",
+        "modified_time": "1700000001",
+        "name": "lekciya_01.pdf",
+        "owner_id": "ou_fixtureowner",
+        "parent_token": "FOLDER_TWO",
+        "token": "TOK_B1",
+        "type": "file",
+        "url": "https://example.feishu.cn/file/TOK_B1"
+      },
+      {
+        "created_time": "1700000000",
+        "modified_time": "1700000001",
+        "name": "lekciya_01.pdf",
+        "owner_id": "ou_fixtureowner",
+        "parent_token": "FOLDER_TWO",
+        "token": "TOK_B2",
+        "type": "file",
+        "url": "https://example.feishu.cn/file/TOK_B2"
+      },
+      {
+        "created_time": "1700000000",
+        "modified_time": "1700000001",
+        "name": "vide",
+        "owner_id": "ou_fixtureowner",
+        "parent_token": "FOLDER_TWO",
+        "token": "EMPTY_ONE",
+        "type": "folder",
+        "url": "https://example.feishu.cn/drive/folder/EMPTY_ONE"
+      }
+    ],
+    "has_more": false
+  },
+  "_notice": {
+    "update": {
+      "command": "lark-cli update",
+      "current": "1.0.85",
+      "latest": "1.0.85",
+      "message": "fixture"
+    }
+  }
+}
