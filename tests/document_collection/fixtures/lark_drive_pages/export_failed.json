@@ -1,0 +1,17 @@
+{
+  "ok": false,
+  "identity": "user",
+  "error": {
+    "type": "business",
+    "subtype": "export_not_supported",
+    "message": "this document type can not be exported to xlsx"
+  },
+  "_notice": {
+    "update": {
+      "command": "lark-cli update",
+      "current": "1.0.85",
+      "latest": "1.0.85",
+      "message": "fixture"
+    }
+  }
+}
