@@ -1,0 +1,26 @@
+{
+  "ok": true,
+  "identity": "user",
+  "data": {
+    "metas": [
+      {
+        "create_time": "1700000000",
+        "doc_token": "TOK_A1",
+        "doc_type": "file",
+        "latest_modify_time": "1700000001",
+        "latest_modify_user": "ou_fixtureowner",
+        "owner_id": "ou_fixtureowner",
+        "title": "cours_01.pdf",
+        "url": "https://example.feishu.cn/file/TOK_A1"
+      }
+    ]
+  },
+  "_notice": {
+    "update": {
+      "command": "lark-cli update",
+      "current": "1.0.85",
+      "latest": "1.0.85",
+      "message": "fixture"
+    }
+  }
+}
