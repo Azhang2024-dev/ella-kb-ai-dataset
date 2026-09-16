@@ -1,0 +1,15 @@
+{
+  "ok": false,
+  "error": {
+    "type": "auth",
+    "message": "user_access_token=u-abcdef0123456789ABCDEF is expired; Authorization: Bearer t-abcdef0123456789ABCDEF"
+  },
+  "_notice": {
+    "update": {
+      "command": "lark-cli update",
+      "current": "1.0.85",
+      "latest": "1.0.85",
+      "message": "fixture"
+    }
+  }
+}
