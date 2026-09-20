@@ -81,6 +81,8 @@ def build_parser() -> argparse.ArgumentParser:
             "  collection.generate_questions -> questions\n"
             "  collection.report           -> report\n"
             "  collection.resume           -> resume\n"
+            "  collection.release          -> release（人工放行，需人工指定 item_id）\n"
+            "  collection.material_type    -> material-type（资料类型标注，填交付表「类型」列）\n"
             "\n退出码：0 完成 / 2 部分完成 / 3 需人工复核 / 1 失败（audit 不通过也是 1）"
             " / 4 配置错误\n"
             "只读诊断：resume（下一步）/ status（阶段×状态矩阵）/ explain（单条判定链）"
@@ -228,6 +230,31 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--allow-out-of-scope-subject", action="store_true",
                    help="关闭学科二次校验（默认只交付学科属于 P0∪P1 的文档）")
     p.set_defaults(handler=cmd_deliver)
+
+    p = sub.add_parser("release",
+                       help="人工放行：把复核确认的 needs_review 条目改判为 accepted")
+    p.add_argument("--item-id", action="append", default=[],
+                   help="要放行的 item_id（可重复，或配合 --item-id-file）")
+    p.add_argument("--item-id-file", default=None,
+                   help="从文件读 item_id 白名单（每行一个，# 开头为注释）")
+    p.add_argument("--reason", default="",
+                   help="放行理由（写进决策，便于 explain 追溯）")
+    p.add_argument("--by", default="human", help="放行人标识（默认 human）")
+    p.add_argument("--dry-run", action="store_true",
+                   help="只做逐条校验并输出判定，不落库")
+    p.set_defaults(handler=cmd_release)
+
+    p = sub.add_parser("material-type",
+                       help="资料类型标注：给交付表「类型」列判 教材/课堂笔记/试卷/讲义/作业习题")
+    p.add_argument("--item-id", action="append", default=[],
+                   help="要标注的 item_id（可重复，或配合 --item-id-file；空缺省全 accepted 池）")
+    p.add_argument("--item-id-file", default=None,
+                   help="从文件读 item_id 白名单（每行一个，# 开头为注释）")
+    p.add_argument("--dry-run", action="store_true",
+                   help="只输出逐条判定，不落库")
+    p.add_argument("--llm", action="store_true",
+                   help="规则没命中时用模型兜底（需配 llm_config.json）")
+    p.set_defaults(handler=cmd_material_type)
 
     p = sub.add_parser("resume", help="查看当前运行进度并给出下一步能力")
     p.set_defaults(handler=cmd_resume)
@@ -475,6 +502,25 @@ def cmd_deliver(args: argparse.Namespace, service: CoreService) -> int:
         languages=tuple(getattr(args, "language", []) or ()),
         item_ids=tuple(getattr(args, "item_id", []) or ()),
         require_subject_in_scope=not bool(getattr(args, "allow_out_of_scope_subject", False)),
+    )
+    return _emit(result, args)
+
+
+def cmd_release(args: argparse.Namespace, service: CoreService) -> int:
+    result = service.release(
+        item_ids=tuple(_read_item_id_args(args)),
+        reason=str(getattr(args, "reason", "") or ""),
+        released_by=str(getattr(args, "by", "human") or "human"),
+        dry_run=bool(getattr(args, "dry_run", False)),
+    )
+    return _emit(result, args)
+
+
+def cmd_material_type(args: argparse.Namespace, service: CoreService) -> int:
+    result = service.material_type(
+        item_ids=tuple(_read_item_id_args(args)),
+        dry_run=bool(getattr(args, "dry_run", False)),
+        use_llm=bool(getattr(args, "llm", False)),
     )
     return _emit(result, args)
 
