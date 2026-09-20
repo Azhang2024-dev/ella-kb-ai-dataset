@@ -34,6 +34,8 @@ from .inventory import InventoryOptions, run_inventory
 from .query_generation import QueryOptions, run_query_generation
 from .question_generation import QuestionOptions, run_question_generation
 from .delivery import DeliverOptions, run_deliver
+from .release import ReleaseOptions, run_release
+from .material_type import MaterialTypeOptions, run_material_type
 from .reporting import run_report
 from .screening import ScreeningOptions, run_screen
 from .state import StateStore
@@ -472,6 +474,59 @@ class CoreService:
                           for p in summary.get("artifacts", []))
         return self._result(capability, status, summary, artifacts=artifacts,
                             next_action="collection.report")
+
+    # -- 能力：人工放行 ---------------------------------------------------
+    def release(self, *, item_ids: Sequence[str] = (), reason: str = "",
+                released_by: str = "human", dry_run: bool = False) -> RunResult:
+        """把人工复核确认的 needs_review 条目放行为 accepted（追加决策，不覆盖历史）。"""
+        capability = "collection.release"
+        opts = ReleaseOptions(
+            item_ids=tuple(item_ids), reason=reason, released_by=released_by,
+            dry_run=bool(dry_run),
+        )
+        summary = run_release(policy=self.policy, store=self.store,
+                              workspace_dir=self.workspace_dir, run_id=self.run_id,
+                              options=opts, log=self.log)
+        released = int(summary.get("released_total") or 0)
+        rejected = int(summary.get("rejected_total") or 0)
+        if rejected:
+            # 有拒收就不算干净完成：需要人工看看为什么没放进去
+            status = STATUS_NEEDS_REVIEW
+        else:
+            status = STATUS_COMPLETED
+        # _emit 的人读分支只打印白名单键，这里把放行计数塞进已识别的键名
+        summary["total_documents"] = released
+        return self._result(capability, status, summary,
+                            next_action="collection.deliver")
+
+    # -- 能力：资料类型标注 -----------------------------------------------
+    def material_type(self, *, item_ids: Sequence[str] = (), dry_run: bool = False,
+                      use_llm: bool = False) -> RunResult:
+        """给交付表「类型」列标注（教材/课堂笔记/试卷/讲义/作业习题），追加落库。"""
+        capability = "collection.material_type"
+        opts = MaterialTypeOptions(item_ids=tuple(item_ids), dry_run=bool(dry_run),
+                                   use_llm=bool(use_llm))
+        llm = self.build_llm(force_enabled=True) if use_llm else None
+        if use_llm and not getattr(llm, "available", False):
+            return self._result(capability, STATUS_NEEDS_REVIEW, {
+                "total_requested": 0, "labeled_total": 0, "unresolved_total": 0,
+                "dry_run": bool(dry_run), "by_type": {}, "by_genre": {},
+            }, errors=[error_record(
+                "llm_unavailable",
+                "显式要求模型兜底，但适配器不可用：检查 config/llm_config.json "
+                "是否存在且含 llm_api_key，或用不带 --llm 的规则模式",
+            )], next_action="collection.material_type")
+        summary = run_material_type(policy=self.policy, store=self.store,
+                                    workspace_dir=self.workspace_dir,
+                                    run_id=self.run_id, options=opts,
+                                    llm=llm, log=self.log)
+        unresolved = int(summary.get("unresolved_total") or 0)
+        # 有判不出来的就落 needs_review：标注结果不完整，需要人工看一眼，不粉饰。
+        status = STATUS_NEEDS_REVIEW if unresolved else STATUS_COMPLETED
+        # _emit 的人读分支只打印白名单键，这里把标注计数塞进已识别的键名
+        summary["total_documents"] = int(summary.get("labeled_total") or 0)
+        return self._result(capability, status, summary,
+                            next_action="collection.deliver")
 
     # -- 能力 7：report ---------------------------------------------------
     def report(self) -> RunResult:
