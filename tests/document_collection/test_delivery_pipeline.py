@@ -285,6 +285,52 @@ def test_infer_material_type():
     assert infer_material_type("普通文档名.pdf") == ""
 
 
+def test_material_type_head_classifier_and_folding():
+    """资料类型：头部规则判真实体裁，再确定性折叠成五类（不放宽、不臆造）。"""
+    from core.document_collection.material_type import (
+        FOLD_TO_FIVE, FIVE_TYPES, fold_to_five, infer_from_head,
+    )
+
+    # 真实体裁
+    assert infer_from_head("摘要：本文研究了…关键词：X")[0] == "学术论文"
+    assert infer_from_head("ЭКЗАМЕНАЦИОННЫЙ БИЛЕТ № 1 по дисциплине")[0] == "试卷"
+    assert infer_from_head("CHAPITRE 2 : BASES EN GÉNÉTIQUE")[0] == "教材"  # 大小写不敏感
+    assert infer_from_head("实验一 一、实验目的 二、实验装置")[0] == "实验指导"
+    # `cours` 不能命中英文 "discourse"（曾经的真实误判）
+    assert infer_from_head("a discourse analysis of questions")[0] == ""
+    # 文件名兜底：下划线分隔的分桶前缀
+    assert infer_from_head("", "lecture_العقل_البشري_582_M.pdf")[0] == "讲义"
+
+    # 折叠：严格五类，且只在五类里
+    assert set(FOLD_TO_FIVE.values()) <= set(FIVE_TYPES) | {""}
+    assert fold_to_five("学术论文") == "教材"
+    assert fold_to_five("官方手册") == "教材"
+    assert fold_to_five("课程大纲") == "讲义"
+    assert fold_to_five("实验指导") == "作业习题"
+    assert fold_to_five("其他") == ""          # 判不出留空，不硬套
+    assert fold_to_five("不存在的体裁") == ""
+    assert fold_to_five("课堂笔记") == "课堂笔记"   # 五类之一，必须可达
+
+
+def test_material_type_detects_class_notes_without_false_positives():
+    """课堂笔记必须判得出，且不能把参考文献/试卷说明里的 "lecture notes" 误吞。"""
+    from core.document_collection.material_type import fold_to_five, infer_from_head
+
+    # 标题处自述为笔记 → 命中（多语种）
+    assert infer_from_head(
+        "UMARU MUSA YAR'ADUA UNIVERSITY MTH 1311 LECTURE NOTE Prepared by…")[0] == "课堂笔记"
+    assert infer_from_head(
+        "ПОВОЛЖСКИЙ ГОСУДАРСТВЕННЫЙ УНИВЕРСИТЕТ КОНСПЕКТ ЛЕКЦИЙ ПО ДИСЦИПЛИНЕ")[0] == "课堂笔记"
+    assert fold_to_five(infer_from_head("课堂笔记：第三章重点整理")[0]) == "课堂笔记"
+
+    # 参考文献里的丛书名（正文尾部）不能命中
+    ref = ("正文正文" * 2000) + " von Stechow (2008), Topics in Degree Semantics. "
+    assert infer_from_head(ref + "Lecture Notes, Eberhard Karls Universität Tübingen.")[0] != "课堂笔记"
+    # 试卷说明里的 "refer to your lecture notes" 是让考生看笔记，不是笔记正文
+    exam = "## General Instructions\n• You can refer to your lecture notes.\n• Total 7 Marks"
+    assert infer_from_head(exam)[0] != "课堂笔记"
+
+
 def test_manifest_lists_deliver_capability():
     manifest = json.load(open(os.path.join(
         os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
