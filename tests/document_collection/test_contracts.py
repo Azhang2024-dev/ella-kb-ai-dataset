@@ -10,18 +10,19 @@ from core.document_collection import contracts as C
 
 
 def test_capability_table_is_complete_and_consistent():
-    assert len(C.CAPABILITIES) == 11
+    assert len(C.CAPABILITIES) == 13
     names = [c["name"] for c in C.CAPABILITIES]
     assert names == [
         "collection.inventory", "collection.acquire", "collection.extract",
         "collection.screen", "collection.deduplicate", "collection.generate_queries",
         "collection.generate_questions", "collection.report", "collection.resume",
-        "collection.ingest", "collection.deliver",
+        "collection.ingest", "collection.deliver", "collection.release",
+        "collection.material_type",
     ]
     cli = [c["cli_command"] for c in C.CAPABILITIES]
-    assert len(set(cli)) == 11, "CLI 命令名不能重复"
+    assert len(set(cli)) == 13, "CLI 命令名不能重复"
     mcp = [c["future_mcp_tool"] for c in C.CAPABILITIES]
-    assert len(set(mcp)) == 11
+    assert len(set(mcp)) == 13
     for cap in C.CAPABILITIES:
         # future_mcp_tool 由能力名派生（query/questions 的 CLI 命令名比能力名短）
         assert cap["future_mcp_tool"] == "collection_" + cap["name"].split(".", 1)[1]
