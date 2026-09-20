@@ -43,3 +43,7 @@ $PY $CLI --run-id '@latest' screen --semantic # 含模型复核
 本步拿不准是否该停下时，**引用编排 skill**：见编排 SKILL.md §6。
 特别地，`needs_review` 队列非空时**必须停下**把 `human_review_queue.csv` 交给用户，
 不得自行放行。业务数字一律以 `config/collection_policy.json` 为准（本文件不复制）。
+
+用户复核后确认放行的条目，走 `$CLI release --item-id <ID> [--item-id-file <路径>]`
+（先 `--dry-run` 看逐条判定）。放行只对待复核队列生效，且只做 `needs_review → accepted`，
+以追加决策落库、不覆盖历史；采集阶段已被硬拒绝的条目不会被翻案。
