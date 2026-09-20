@@ -33,6 +33,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Sequence
 
 from .config import CollectionPolicy
+from .material_type import fold_to_five
 from .state import StateStore
 from . import winpath
 
@@ -111,6 +112,24 @@ def _subject_of(decision: Mapping[str, Any] | None) -> str:
     return str(ev.get("subject") or ev.get("subject_hint") or "unknown").lower()
 
 
+def _material_type_of(decision: Mapping[str, Any] | None, name: str | None) -> str:
+    """资料类型：优先取 material-type 能力落库的结论，缺省才回落文件名启发式。
+
+    落库结论是"读正文头部"判出来的（比只看文件名准得多：
+    `exam_droit_*.pdf` 这类文件名骗人的情况靠正文才能纠正）；
+    但历史 run 可能没跑过该能力，那时仍保留原有的文件名兜底，不把列变空。
+
+    两条路都要落在**严格五类**里：文件名启发式有 实验指导/课程大纲 等标签，
+    它们不属于交付表口径，按同一张折叠表收口（实验指导→作业习题、课程大纲→讲义）。
+    """
+    ev = (decision or {}).get("evidence") or {}
+    label = str(ev.get("material_type") or "").strip()
+    if label:
+        return fold_to_five(label) or label
+    fallback = infer_material_type(name)
+    return fold_to_five(fallback) if fallback else ""
+
+
 def _excluded_kinds_of(decision: Mapping[str, Any] | None) -> str | None:
     ev = (decision or {}).get("evidence") or {}
     kind = ev.get("exclude_kind")
@@ -129,6 +148,9 @@ def select_documents(*, policy: CollectionPolicy, store: StateStore,
     excluded = set(opts.exclude_kinds if opts.exclude_kinds is not None
                    else (policy.section("exclusions").get("document_kinds") or []))
     decisions = store.latest_decisions("screen")
+    # 资料类型：优先取 material-type 标注能力落库的结论；没有才回落到文件名启发式。
+    # 交付表「类型」列此前一直为空（组装脚本硬写空串），这里把它接上真实判定。
+    material_decisions = store.latest_decisions("material_type")
     items = {str(i["item_id"]): i for i in store.list_items()}
     wanted = {str(x) for x in opts.item_ids} if opts.item_ids else None
 
@@ -162,7 +184,8 @@ def select_documents(*, policy: CollectionPolicy, store: StateStore,
             "language": lang,
             "subject": subject,
             "subject_zh": _subject_zh(subject),
-            "material_type": infer_material_type(item.get("name")),
+            "material_type": _material_type_of(material_decisions.get(item_id),
+                                               item.get("name")),
             "extension": (item.get("extension") or "").lower(),
             "char_count": int((extraction or {}).get("char_count") or 0),
             "source_name": item.get("source_name"),
@@ -289,10 +312,12 @@ def link_real_files(*, store: StateStore, workspace_dir: str, selected: Sequence
 
 def write_delivery_xlsx(*, store: StateStore, workspace_dir: str,
                         rows: Sequence[Mapping[str, Any]], xlsx_name: str,
+                        type_zh: Mapping[str, str] | None = None,
                         log: LogFn = _noop) -> str:
     """按在线 sheet4 的列产出交付表：一行一条 query。
 
-    列：语种 / 文件名 / 格式 / 字符数 / item_id / 类型 / 学科 / 离线文件 / query / query_type
+    列：语种 / 文件名 / 格式 / 字符数 / item_id / 类型 / 离线文件 / query / query_type
+    query_type 列写**中文**（选择题/填空题/…）；英文 key 仍在状态库与 jsonl 里。
     """
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Font, PatternFill
@@ -311,6 +336,9 @@ def write_delivery_xlsx(*, store: StateStore, workspace_dir: str,
 
     lang_zh = {"en": "英语", "zh": "中文", "fr": "法语", "ru": "俄语",
                "ar": "阿拉伯语", "es": "西班牙语", "pt": "葡萄牙语"}
+    # query_type 列写中文（选择题/填空题/…）：表头仍叫 query_type，
+    # 英文 key 仍原样存在状态库与 query_records.jsonl 里，机器读不受影响。
+    zh_map = {str(k): str(v) for k, v in (type_zh or {}).items()}
     n_q = 0
     for r in rows:
         queries = store.queries_for(str(r["item_id"]))
@@ -334,7 +362,10 @@ def write_delivery_xlsx(*, store: StateStore, workspace_dir: str,
             payload = q.get("payload") or {}
             text = payload.get("text") or q.get("text") or ""
             type_key = payload.get("type_key") or q.get("type_key") or ""
-            ws.append(base + [text, type_key])
+            # 优先用 query 自带的 type_zh，回落调用方给的策略映射，再回落原始 key。
+            type_label = (payload.get("type_zh") or zh_map.get(str(type_key))
+                          or str(type_key))
+            ws.append(base + [text, type_label])
             n_q += 1
 
     widths = [8, 42, 7, 10, 30, 10, 16, 34, 60, 16]
@@ -374,7 +405,9 @@ def run_deliver(*, policy: CollectionPolicy, store: StateStore, workspace_dir: s
     rows = linked["rows"]
     csv_path = write_selected_csv(workspace_dir=workspace_dir, rows=rows)
     xlsx_path = write_delivery_xlsx(store=store, workspace_dir=workspace_dir, rows=rows,
-                                    xlsx_name=opts.xlsx_name, log=log)
+                                    xlsx_name=opts.xlsx_name,
+                                    type_zh={str(t.get("type_key")): str(t.get("type_zh") or "")
+                                             for t in policy.query_types}, log=log)
     total_q = sum(len([q for q in store.queries_for(str(r["item_id"]))
                        if str(q.get("status")) == "validated"]) for r in rows)
     return {
