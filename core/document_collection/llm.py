@@ -134,6 +134,9 @@ class LLMAdapter(Protocol):
     def classify_document(self, document_ref: Mapping[str, Any],
                           policy: Mapping[str, Any]) -> dict[str, Any]: ...
 
+    def classify_material_type(self, document_ref: Mapping[str, Any],
+                               policy: Mapping[str, Any]) -> dict[str, Any]: ...
+
     def generate_queries(self, document_ref: Mapping[str, Any],
                          policy: Mapping[str, Any]) -> dict[str, Any]: ...
 
@@ -159,6 +162,10 @@ class OfflineLLMAdapter:
     def classify_document(self, document_ref: Mapping[str, Any],
                           policy: Mapping[str, Any]) -> dict[str, Any]:
         raise LLMUnavailable(f"离线适配器不可用于语义判定（{self.reason}）")
+
+    def classify_material_type(self, document_ref: Mapping[str, Any],
+                               policy: Mapping[str, Any]) -> dict[str, Any]:
+        raise LLMUnavailable(f"离线适配器不可用于资料类型判定（{self.reason}）")
 
     def generate_queries(self, document_ref: Mapping[str, Any],
                          policy: Mapping[str, Any]) -> dict[str, Any]:
@@ -287,6 +294,20 @@ class LiteLLMAdapter:
             raw2 = self.complete(repair, scene="classify_repair")
             return extract_json_object(raw2)
 
+    def classify_material_type(self, document_ref: Mapping[str, Any],
+                               policy: Mapping[str, Any]) -> dict[str, Any]:
+        prompt = build_material_type_prompt(document_ref, policy)
+        raw = self.complete(prompt, scene="material_type")
+        try:
+            return extract_json_object(raw)
+        except LLMOutputInvalid:
+            repair = prompt + (
+                "\n\n上一次输出无法解析。请只输出一个 JSON 对象，不要任何解释文字、"
+                "不要 Markdown 代码围栏。字段：genre, confidence, evidence。"
+            )
+            raw2 = self.complete(repair, scene="material_type_repair")
+            return extract_json_object(raw2)
+
     def generate_queries(self, document_ref: Mapping[str, Any],
                          policy: Mapping[str, Any]) -> dict[str, Any]:
         prompt = build_query_prompt(document_ref, policy)
@@ -361,6 +382,45 @@ def build_classification_prompt(document_ref: Mapping[str, Any],
 只输出一个 JSON 对象：
 {{"education_level":"...","subject":"...","queryability":"...","exclude_kind":null,
 "evidence":["..."],"confidence":0.0,"needs_human_review":false}}"""
+
+
+def build_material_type_prompt(document_ref: Mapping[str, Any],
+                               policy: Mapping[str, Any]) -> str:
+    """资料类型判定提示词（交付表「类型」列用）。
+
+    只给正文头部样本：抽样显示 200–1200 字就足以定体裁，没必要喂全文。
+    口径是**宽口径真实体裁**（语料里确实存在学术论文/官方手册/课程大纲等），
+    折叠成五类由代码确定性地做，模型不负责收口。
+    """
+    text = str(document_ref.get("text") or "")[:1800]
+    meta = {k: v for k, v in document_ref.items() if k != "text"}
+    genres = policy.get("genres") or []
+    five = policy.get("five_types") or []
+    return f"""你是知识库评测集的资料类型判定助手。请只依据给出的正文样本判断，不要臆测。
+
+【文档元信息】
+{json.dumps(meta, ensure_ascii=False, indent=2)[:1200]}
+
+【正文头部样本】
+{text}
+
+【真实体裁（genre）只能从这个封闭集合里选一个】：
+{json.dumps(genres, ensure_ascii=False)}
+说明：
+- 学术论文：带摘要/关键词/作者单位/期刊卷期/参考文献的论文。
+- 官方手册：官方指南、规范文件、参考书（ISBN/УДК/WHO 等）、合同协议。
+- 课程大纲：Programa/Syllabus/Guía docente/Учебный план/Рабочая программа。
+- 实验指导：实验目的/装置/步骤类实验手册。
+- 教材/讲义/试卷/课堂笔记/作业习题：按字面含义。
+- 其他：都不像时选它（不要硬套）。
+注意：文件名前缀（exam_/lecture_/misc_）是采集分桶标签，**不是**体裁依据；
+以正文头部为准。
+
+- confidence: 0-1 的小数。
+- evidence: 1-3 条直接摘自样本的短句（每条不超过 60 字），用来支撑判断。
+
+只输出一个 JSON 对象：
+{{"genre":"...","confidence":0.0,"evidence":["..."]}}"""
 
 
 # 学科 key 的中文释义：喂给分类提示词，让模型知道每个 key 到底指什么，
