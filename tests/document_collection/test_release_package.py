@@ -29,7 +29,7 @@ ORCHESTRATOR = "document_collection"
 VALID_CLI_COMMANDS = {
     "inventory", "acquire", "extract", "deduplicate", "screen", "query", "questions",
     "report", "resume", "status", "explain", "audit", "runs", "validate-config",
-    "ingest", "reconcile",
+    "ingest", "reconcile", "release", "material-type",
 }
 
 
