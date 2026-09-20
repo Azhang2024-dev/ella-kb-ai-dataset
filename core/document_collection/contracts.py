@@ -131,6 +131,24 @@ CAPABILITIES: tuple[dict[str, str], ...] = (
         "cli_command": "deliver",
         "future_mcp_tool": "collection_deliver",
     },
+    {
+        # 人工放行：把人工复核确认过的 needs_review 条目改判为 accepted。
+        # screen 只负责"产人工队列"，这个能力负责"回填人工结论"，
+        # 两者合起来才是完整的 gate。决策以追加方式落库，不覆盖历史结论；
+        # 不进入 fixed_pipeline_order（它是人工 gate 动作，不是流水线固定步骤）。
+        "name": "collection.release",
+        "cli_command": "release",
+        "future_mcp_tool": "collection_release",
+    },
+    {
+        # 资料类型标注：给交付表「类型」列（教材/课堂笔记/试卷/讲义/作业习题）。
+        # 只读抽取文本的**头部**判定，规则先行、模型兜底，再折叠到五类；
+        # 决策以追加方式落库（独立 stage=material_type），不覆盖任何历史结论。
+        # 不进入 fixed_pipeline_order（按需标注动作，不是流水线固定步骤）。
+        "name": "collection.material_type",
+        "cli_command": "material-type",
+        "future_mcp_tool": "collection_material_type",
+    },
 )
 
 CAPABILITY_NAMES: tuple[str, ...] = tuple(c["name"] for c in CAPABILITIES)
@@ -201,6 +219,14 @@ RC_SOURCE_READONLY = "source_is_read_only"
 # 学科范围门禁：模型判定的学科不在策略声明的 P0∪P1 集合内（如心理学/社会学/艺术学）。
 # 需求 3.1 要求"学科属于 P0 或 P1 范围"是硬条件，不是仅用于展示的配比维度。
 RC_SUBJECT_OUT_OF_SCOPE = "subject_out_of_scope"
+# 人工放行：人工复核确认 needs_review 队列里的条目确实合格，改判为 accepted。
+# 它是"通过的闸门"而不是淘汰原因，所以归入 POSITIVE_REASON_CODES，
+# 否则会污染"淘汰原因分布"统计（把放行说成一种淘汰理由）。
+RC_HUMAN_RELEASED = "human_released"
+# 资料类型标注：把交付表「类型」列填上（教材/课堂笔记/试卷/讲义/作业习题）。
+# 它是"给文档打的一个标签"，既不是通过也不是淘汰，所以归入 POSITIVE_REASON_CODES，
+# 否则会污染"淘汰原因分布"统计（把标注说成一种淘汰理由）。
+RC_MATERIAL_TYPE = "material_type"
 
 
 # reason_codes 是一条完整的判定轨迹，里面同时包含"通过了哪些闸门"和"最终因为什么被拒"。
@@ -208,7 +234,7 @@ RC_SUBJECT_OUT_OF_SCOPE = "subject_out_of_scope"
 # 自相矛盾的表格（第一次真实 Pilot 的覆盖报告就是这样）。所以显式分成三类。
 POSITIVE_REASON_CODES: frozenset[str] = frozenset({
     RC_OK, RC_ACQUIRED, RC_EXT_SUPPORTED, RC_SIZE_WITHIN_LIMIT, RC_LANG_SUPPORTED,
-    RC_EXTRACT_OK, RC_DUP_UNIQUE,
+    RC_EXTRACT_OK, RC_DUP_UNIQUE, RC_HUMAN_RELEASED, RC_MATERIAL_TYPE,
 })
 
 # 信息性标记：既不是通过也不是拒绝，只是提醒后续要走别的流程
