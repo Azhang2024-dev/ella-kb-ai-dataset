@@ -139,6 +139,8 @@ Skill 目录只放说明文件和 1 行配置，不放代码、不放策略副�
 | `query` | `collection.generate_queries` | 只给 accepted 文档生成 10 条 query；`--item-id` 定向 |
 | `questions` | `collection.generate_questions` | 为已验证 query 的文档生成参考题目（题干/答案/解析）；`--item-id` 定向 |
 | `deliver` | `collection.deliver` | **交付**：按语种/学科选目标集 + 真实文件名落地 + 出交付表（一行一条 query）；`--per-language` 定量、`--item-id` 定向 |
+| `release` | `collection.release` | **人工放行**：把人工复核确认合格的 `needs_review` 条目改判为 accepted；只允许 `needs_review→accepted`，逐条复核硬约束并以追加方式落库。需人工指定 `--item-id`，先 `--dry-run` 看判定 |
+| `material-type` | `collection.material_type` | **资料类型标注**：给交付表「类型」列判 教材/课堂笔记/试卷/讲义/作业习题。只读抽取文本头部（不重抽不读全文），规则先行、模型兜底（`--llm`），判不出的留空并标 needs_review |
 | `reconcile` | —（一致性修复） | 把 `query_records.jsonl` 回灌状态库（jsonl 与库错位时用） |
 | `report` | `collection.report` | 出覆盖、淘汰、配额缺口、成本报告 + 交付汇总表 |
 | `resume` | `collection.resume` | 不知道进行到哪一步时先跑这个 |
