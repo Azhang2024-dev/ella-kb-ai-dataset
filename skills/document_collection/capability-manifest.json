@@ -545,6 +545,87 @@
         "missing_files>0 -> 有条目的 artifact 缺失，回查 acquire/extract"
       ],
       "next_action": "collection.report"
+    },
+    {
+      "name": "collection.release",
+      "version": "0.1",
+      "cli_command": "release",
+      "future_mcp_tool": "collection_release",
+      "summary": "人工放行：把人工复核确认合格的 needs_review 条目改判为 accepted。只允许 needs_review→accepted，逐条复核硬约束（采集期硬拒绝不翻案、语种在范围内、学科属 P0∪P1、与已 accepted 文档不同源不同文），任一不过即拒收；决策以追加方式落库，不覆盖历史结论。",
+      "side_effects": [
+        "write_local",
+        "needs_human_review"
+      ],
+      "requires_llm": false,
+      "may_need_human_review": true,
+      "retryable": true,
+      "idempotent": true,
+      "inputs": {
+        "item_id": "string[], 要放行的 item_id（可重复，或配合 item_id_file）",
+        "item_id_file": "string, 从文件读 item_id 白名单（每行一个，# 注释）",
+        "reason": "string, 放行理由（写进决策，便于 explain 追溯）",
+        "by": "string, 放行人标识（默认 human）",
+        "dry_run": "flag, 只逐条校验并输出判定，不落库"
+      },
+      "outputs": {
+        "artifacts": [],
+        "summary_keys": [
+          "total_requested",
+          "released_total",
+          "rejected_total",
+          "skipped_total",
+          "dry_run",
+          "released",
+          "rejected",
+          "skipped"
+        ]
+      },
+      "stop_conditions": [
+        "rejected_total>0 -> 逐条看 reason_codes（duplicate_stem_with_accepted / subject_out_of_scope / acquire_stage_already_rejected 等），不要绕过校验硬塞",
+        "skipped_total>0 -> 该条目当前不是 needs_review（已是 accepted/rejected），放行只对待复核队列生效"
+      ],
+      "next_action": "collection.deliver"
+    },
+    {
+      "name": "collection.material_type",
+      "version": "0.1",
+      "cli_command": "material-type",
+      "future_mcp_tool": "collection_material_type",
+      "summary": "资料类型标注：给交付表「类型」列判 教材/课堂笔记/试卷/讲义/作业习题。只读抽取文本的**头部**（不重抽、不读全文），多语种头部标记规则先行，规则未命中的才交给模型兜底；判出的真实体裁（学术论文/官方手册/课程大纲/实验指导等）由代码确定性折叠成五类，真实体裁原样记进 evidence；判不出的留空并标 needs_review，绝不臆造。决策以追加方式落库（独立 stage=material_type），不覆盖任何历史结论。",
+      "side_effects": [
+        "write_local",
+        "needs_human_review"
+      ],
+      "requires_llm": false,
+      "optional_llm": true,
+      "may_need_human_review": true,
+      "retryable": true,
+      "idempotent": true,
+      "inputs": {
+        "item_id": "string[], 要标注的 item_id（可重复，或配合 item_id_file；空缺省全部 accepted 池）",
+        "item_id_file": "string, 从文件读 item_id 白名单（每行一个，# 注释）",
+        "dry_run": "flag, 只输出逐条判定，不落库",
+        "llm": "flag, 规则没命中时用模型兜底（需 config/llm_config.json）"
+      },
+      "outputs": {
+        "artifacts": [],
+        "summary_keys": [
+          "total_requested",
+          "labeled_total",
+          "unresolved_total",
+          "dry_run",
+          "by_type",
+          "by_genre",
+          "method_counts",
+          "unresolved",
+          "labels"
+        ]
+      },
+      "stop_conditions": [
+        "unresolved_total>0 -> 这些条目判不出五类，已留空并标 needs_review，需人工看一眼，不要硬套最近似的一类",
+        "dry_run=true -> 只输出判定，没有落库；确认无误后再去掉 --dry-run 实跑"
+      ],
+      "next_action": "collection.deliver"
     }
   ],
   "capabilities_order_note": "capabilities 数组是按能力注册表顺序排列（与 core/document_collection/contracts.py 的 CAPABILITIES 一一对应），不是执行顺序；真实执行顺序见 fixed_pipeline_order。screen 依赖 deduplicate 的结果（精确重复要在硬筛选里淘汰），所以执行时 deduplicate 在 screen 之前。",
